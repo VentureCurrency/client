@@ -15,21 +15,23 @@ import (
 
 const deviceEKPrefix = "device-eks/device-ephemeral-key"
 
+type DeviceEKMap map[keybase1.EkGeneration]keybase1.DeviceEk
+
 type DeviceEKStorage struct {
 	libkb.Contextified
 	sync.Mutex
 	indexOnce *sync.Once
 	storage   erasablekv.ErasableKVStore
-	cache     map[keybase1.EkGeneration]keybase1.DeviceEk
+	cache     DeviceEKMap
 	keyPrefix string
 }
 
 func NewDeviceEKStorage(g *libkb.GlobalContext) *DeviceEKStorage {
-	keyPrefix := fmt.Sprintf("%s-%s", deviceEKPrefix, g.Env.GetUsername().String())
+	keyPrefix := fmt.Sprintf("%s-%s", deviceEKPrefix, g.Env.GetUsername())
 	return &DeviceEKStorage{
 		Contextified: libkb.NewContextified(g),
 		storage:      erasablekv.NewFileErasableKVStore(g),
-		cache:        make(map[keybase1.EkGeneration]keybase1.DeviceEk),
+		cache:        make(DeviceEKMap),
 		indexOnce:    new(sync.Once),
 		keyPrefix:    keyPrefix,
 	}
@@ -124,7 +126,12 @@ func (s *DeviceEKStorage) index(ctx context.Context) (err error) {
 	return err
 }
 
-func (s *DeviceEKStorage) GetAll(ctx context.Context) (deviceEKs map[keybase1.EkGeneration]keybase1.DeviceEk, err error) {
+// Used for testing
+func (s *DeviceEKStorage) ClearCache() {
+	s.cache = make(DeviceEKMap)
+}
+
+func (s *DeviceEKStorage) GetAll(ctx context.Context) (deviceEKs DeviceEKMap, err error) {
 	defer s.G().CTrace(ctx, "DeviceEKStorage#GetAll", func() error { return err })()
 	s.Lock()
 	defer s.Unlock()
