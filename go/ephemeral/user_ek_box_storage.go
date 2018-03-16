@@ -264,7 +264,7 @@ func (s *UserEKBoxStorage) DeleteExpired(ctx context.Context) (err error) {
 
 	keyMap := make(keyExpiryMap)
 	for generation, userEKBoxed := range s.cache {
-		keyMap[generation] = userEKBoxed.Metadata.CTime
+		keyMap[generation] = userEKBoxed.Metadata.Ctime
 	}
 
 	latestMerkleRoot, err := s.G().GetMerkleClient().FetchRootFromServer(ctx, libkb.EphemeralKeyMerkleFreshness)

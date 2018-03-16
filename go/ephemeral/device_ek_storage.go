@@ -175,7 +175,7 @@ func (s *DeviceEKStorage) DeleteExpired(ctx context.Context) (err error) {
 
 	keyMap := make(keyExpiryMap)
 	for generation, deviceEK := range s.cache {
-		keyMap[generation] = deviceEK.Metadata.CTime
+		keyMap[generation] = deviceEK.Metadata.Ctime
 	}
 
 	latestMerkleRoot, err := s.G().GetMerkleClient().FetchRootFromServer(ctx, libkb.EphemeralKeyMerkleFreshness)
