@@ -65,7 +65,7 @@ func (e *LoginProvisionedDevice) Run(ctx *Context) error {
 
 func (e *LoginProvisionedDevice) run(ctx *Context) error {
 	// already logged in?
-	in, err := e.G().LoginState().LoggedInProvisionedCheck()
+	in, err := e.G().LoginState().LoggedInProvisioned(ctx.GetNetContext())
 	if err == nil && in {
 		if len(e.username) == 0 || e.G().Env.GetUsername() == libkb.NewNormalizedUsername(e.username) {
 			// already logged in, make sure to unlock device keys
@@ -170,7 +170,7 @@ func (e *LoginProvisionedDevice) run(ctx *Context) error {
 
 func (e *LoginProvisionedDevice) unlockDeviceKeys(ctx *Context, me *libkb.User) error {
 
-	// CORE-5876 idea that lksec will be unusable if reachablity state is NO
+	// CORE-5876 idea that lksec will be unusable if reachability state is NO
 	// and the user changed passphrase with a different device since it won't
 	// be able to sync the new server half.
 	if e.G().ConnectivityMonitor.IsConnected(ctx.NetContext) != libkb.ConnectivityMonitorYes {

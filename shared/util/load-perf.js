@@ -1,9 +1,8 @@
 // @flow
-import fetchKeys from 'lodash/keys'
+import {keys} from 'lodash-es'
 import Perf from './react-perf'
 
-function print(...rest) {
-  // $FlowIssue
+function print(rest) {
   console.log(`%c⏱ React perf: ${rest}`, 'font-size: x-large')
 }
 
@@ -59,8 +58,8 @@ function shallowEqualDebug(objA, objB, compare, compareContext) {
     return false
   }
 
-  const keysA = fetchKeys(objA)
-  const keysB = fetchKeys(objB)
+  const keysA = keys(objA)
+  const keysB = keys(objB)
 
   const len = keysA.length
   if (len !== keysB.length) {

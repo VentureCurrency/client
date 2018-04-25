@@ -24,10 +24,12 @@ const mapStateToProps = (state: TypedState, ownProps: OwnProps) => {
 
   let admin = false
   let canEditChannel = false
+  let canSetRetention = false
   if (meta.teamname) {
     const yourOperations = getCanPerform(state, meta.teamname)
     admin = yourOperations.manageMembers
     canEditChannel = yourOperations.editChannelDescription
+    canSetRetention = yourOperations.setRetentionPolicy
   }
 
   return {
@@ -35,6 +37,7 @@ const mapStateToProps = (state: TypedState, ownProps: OwnProps) => {
     _infoMap: state.users.infoMap,
     admin,
     canEditChannel,
+    canSetRetention,
     channelname: meta.channelname,
     description: meta.description,
     isPreview: meta.membershipType === 'youArePreviewing',
@@ -132,7 +135,7 @@ const ConnectedInfoPanel = connect(mapStateToProps, mapDispatchToProps, mergePro
 
 type SelectorOwnProps = {
   conversationIDKey: ?Types.ConversationIDKey,
-  routeProps?: I.RecordOf<{conversationIDKey: Types.ConversationIDKey}>, // on mobile its a route
+  routeProps?: I.RecordOf<{conversationIDKey: Types.ConversationIDKey}>, // on mobile it's a route
   navigateUp?: typeof Route.navigateUp,
 }
 

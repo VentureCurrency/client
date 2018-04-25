@@ -2,10 +2,10 @@
 import * as React from 'react'
 import * as Types from '../../constants/types/fs'
 import {globalStyles, globalColors, globalMargins, isMobile, glamorous, platformStyles} from '../../styles'
-import memoize from 'lodash/memoize'
-import {Box, ClickableBox, Icon, Text, Divider} from '../../common-adapters'
-import PathItemIcon from './path-item-icon'
-import PathItemInfo from './path-item-info'
+import {Badge, Box, ClickableBox, Icon, Meta, Text, Divider} from '../../common-adapters'
+import {memoize} from 'lodash-es'
+import PathItemIcon from '../common/path-item-icon'
+import PathItemInfo from '../common/path-item-info'
 
 type RowProps = {
   name: string,
@@ -13,6 +13,8 @@ type RowProps = {
   lastModifiedTimestamp: number,
   lastWriter: string,
   itemStyles: Types.ItemStyles,
+  badgeCount: number,
+  tlfMeta?: Types.FavoriteMetadata,
   onOpen: () => void,
   openInFileUI: () => void,
   onAction: (event: SyntheticEvent<>) => void,
@@ -32,12 +34,37 @@ const HoverBox = isMobile
       },
     })
 
+const RowMeta = ({badgeCount, isNew, isIgnored, needsRekey}) => {
+  if (isIgnored || !(isNew || isIgnored || needsRekey || badgeCount)) {
+    return <Box />
+  }
+
+  return (
+    <Box style={{width: 0, display: 'flex'}}>
+      {needsRekey && (
+        <Box style={styleBadgeContainerRekey}>
+          <Meta title="rekey" backgroundColor={globalColors.red} />
+        </Box>
+      )}
+      {isNew && (
+        <Box style={styleBadgeContainerNew}>
+          <Meta title="new" backgroundColor={globalColors.orange} />
+        </Box>
+      )}
+      <Box style={styleBadgeContainer}>
+        {!!badgeCount && <Badge badgeNumber={badgeCount} badgeStyle={badgeStyleCount} />}
+      </Box>
+    </Box>
+  )
+}
+
 export const Row = (props: RowProps) => (
   <Box>
     <Box style={stylesCommonRow}>
       <HoverBox style={stylesRowContainer}>
         <ClickableBox onClick={props.onOpen} style={stylesRowBox}>
           <PathItemIcon spec={props.itemStyles.iconSpec} style={pathItemIconStyle} />
+          <RowMeta badgeCount={props.badgeCount} {...props.tlfMeta} />
           <Box style={folderBoxStyle}>
             <Text
               type={props.itemStyles.textType}
@@ -63,12 +90,17 @@ export const Row = (props: RowProps) => (
               className="fs-path-item-hover-icon"
             />
           )}
-          <Icon
-            type="iconfont-ellipsis"
-            style={rowActionIconStyle}
-            onClick={props.onAction}
-            className="fs-path-item-hover-icon"
-          />
+          {// TODO: when we have share-to-app, we'll want to re-enable this on
+          // mobile, but filter out share/download in the popup menu.
+          // Currently it doesn't make sense to popup an empty menu.
+          (!isMobile || props.type !== 'folder') && (
+            <Icon
+              type="iconfont-ellipsis"
+              style={rowActionIconStyle}
+              onClick={props.onAction}
+              className="fs-path-item-hover-icon"
+            />
+          )}
         </Box>
       </HoverBox>
     </Box>
@@ -161,3 +193,26 @@ const rowTextStyles = memoize(color =>
     },
   })
 )
+
+const styleBadgeContainer = {
+  position: 'absolute',
+  left: isMobile ? -24 : 24,
+  top: isMobile ? -20 : -1,
+  zIndex: 200,
+}
+
+const styleBadgeContainerNew = {
+  ...styleBadgeContainer,
+  left: isMobile ? -32 : 16,
+}
+
+const styleBadgeContainerRekey = {
+  ...styleBadgeContainer,
+  top: isMobile ? 5 : 24,
+  left: isMobile ? -40 : 16,
+}
+
+const badgeStyleCount = {
+  marginLeft: 0,
+  marginRight: 0,
+}

@@ -79,6 +79,10 @@ export const SimpleFSSimpleFSCopyRpcChannelMap = (configKeys: Array<string>, req
 
 export const SimpleFSSimpleFSCopyRpcPromise = (request: SimpleFSSimpleFSCopyRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.SimpleFS.simpleFSCopy', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
 
+export const SimpleFSSimpleFSDumpDebuggingInfoRpcChannelMap = (configKeys: Array<string>, request: SimpleFSSimpleFSDumpDebuggingInfoRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.SimpleFS.simpleFSDumpDebuggingInfo', request)
+
+export const SimpleFSSimpleFSDumpDebuggingInfoRpcPromise = (request: SimpleFSSimpleFSDumpDebuggingInfoRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.SimpleFS.simpleFSDumpDebuggingInfo', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
+
 export const SimpleFSSimpleFSGetOpsRpcChannelMap = (configKeys: Array<string>, request: SimpleFSSimpleFSGetOpsRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.SimpleFS.simpleFSGetOps', request)
 
 export const SimpleFSSimpleFSGetOpsRpcPromise = (request: SimpleFSSimpleFSGetOpsRpcParam): Promise<SimpleFSSimpleFSGetOpsResult> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.SimpleFS.simpleFSGetOps', request, (error: RPCError, result: SimpleFSSimpleFSGetOpsResult) => (error ? reject(error) : resolve(result))))
@@ -126,6 +130,10 @@ export const SimpleFSSimpleFSSetStatRpcPromise = (request: SimpleFSSimpleFSSetSt
 export const SimpleFSSimpleFSStatRpcChannelMap = (configKeys: Array<string>, request: SimpleFSSimpleFSStatRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.SimpleFS.simpleFSStat', request)
 
 export const SimpleFSSimpleFSStatRpcPromise = (request: SimpleFSSimpleFSStatRpcParam): Promise<SimpleFSSimpleFSStatResult> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.SimpleFS.simpleFSStat', request, (error: RPCError, result: SimpleFSSimpleFSStatResult) => (error ? reject(error) : resolve(result))))
+
+export const SimpleFSSimpleFSSyncStatusRpcChannelMap = (configKeys: Array<string>, request: SimpleFSSimpleFSSyncStatusRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.SimpleFS.simpleFSSyncStatus', request)
+
+export const SimpleFSSimpleFSSyncStatusRpcPromise = (request: SimpleFSSimpleFSSyncStatusRpcParam): Promise<SimpleFSSimpleFSSyncStatusResult> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.SimpleFS.simpleFSSyncStatus', request, (error: RPCError, result: SimpleFSSimpleFSSyncStatusResult) => (error ? reject(error) : resolve(result))))
 
 export const SimpleFSSimpleFSWaitRpcChannelMap = (configKeys: Array<string>, request: SimpleFSSimpleFSWaitRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.SimpleFS.simpleFSWait', request)
 
@@ -180,11 +188,20 @@ export const appStateAppState = {
   background: 1,
   inactive: 2,
   backgroundactive: 3,
+  backgroundfinal: 4,
 }
 
 export const appStateUpdateAppStateRpcChannelMap = (configKeys: Array<string>, request: AppStateUpdateAppStateRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.appState.updateAppState', request)
 
 export const appStateUpdateAppStateRpcPromise = (request: AppStateUpdateAppStateRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.appState.updateAppState', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
+
+export const avatarsLoadTeamAvatarsRpcChannelMap = (configKeys: Array<string>, request: AvatarsLoadTeamAvatarsRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.avatars.loadTeamAvatars', request)
+
+export const avatarsLoadTeamAvatarsRpcPromise = (request: AvatarsLoadTeamAvatarsRpcParam): Promise<AvatarsLoadTeamAvatarsResult> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.avatars.loadTeamAvatars', request, (error: RPCError, result: AvatarsLoadTeamAvatarsResult) => (error ? reject(error) : resolve(result))))
+
+export const avatarsLoadUserAvatarsRpcChannelMap = (configKeys: Array<string>, request: AvatarsLoadUserAvatarsRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.avatars.loadUserAvatars', request)
+
+export const avatarsLoadUserAvatarsRpcPromise = (request: AvatarsLoadUserAvatarsRpcParam): Promise<AvatarsLoadUserAvatarsResult> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.avatars.loadUserAvatars', request, (error: RPCError, result: AvatarsLoadUserAvatarsResult) => (error ? reject(error) : resolve(result))))
 
 export const backendCommonBlockType = {
   data: 0,
@@ -519,6 +536,13 @@ export const constantsStatusCode = {
   scteamshowcasepermdenied: 2711,
   scteamprovisionalcankey: 2721,
   scteamprovisionalcannotkey: 2722,
+  scstellarerror: 3100,
+  scstellarbadinput: 3101,
+  scstellarwrongrevision: 3102,
+  scstellarmissingbundle: 3103,
+  scstellarbadpuk: 3104,
+  scstellarmissingaccount: 3105,
+  scstellarbadprev: 3106,
 }
 
 export const cryptoSignED25519ForKBFSRpcChannelMap = (configKeys: Array<string>, request: CryptoSignED25519ForKBFSRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.crypto.signED25519ForKBFS', request)
@@ -858,6 +882,10 @@ export const identifyUiDismissReasonType = {
   handledElsewhere: 1,
 }
 
+export const implicitTeamMigrationFinalizeMigrationRpcChannelMap = (configKeys: Array<string>, request: ImplicitTeamMigrationFinalizeMigrationRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.implicitTeamMigration.finalizeMigration', request)
+
+export const implicitTeamMigrationFinalizeMigrationRpcPromise = (request: ImplicitTeamMigrationFinalizeMigrationRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.implicitTeamMigration.finalizeMigration', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
+
 export const implicitTeamMigrationStartMigrationRpcChannelMap = (configKeys: Array<string>, request: ImplicitTeamMigrationStartMigrationRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.implicitTeamMigration.startMigration', request)
 
 export const implicitTeamMigrationStartMigrationRpcPromise = (request: ImplicitTeamMigrationStartMigrationRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.implicitTeamMigration.startMigration', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
@@ -992,6 +1020,10 @@ export const loginGetConfiguredAccountsRpcChannelMap = (configKeys: Array<string
 
 export const loginGetConfiguredAccountsRpcPromise = (request: LoginGetConfiguredAccountsRpcParam): Promise<LoginGetConfiguredAccountsResult> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.login.getConfiguredAccounts', request, (error: RPCError, result: LoginGetConfiguredAccountsResult) => (error ? reject(error) : resolve(result))))
 
+export const loginLoginOneshotRpcChannelMap = (configKeys: Array<string>, request: LoginLoginOneshotRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.login.loginOneshot', request)
+
+export const loginLoginOneshotRpcPromise = (request: LoginLoginOneshotRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.login.loginOneshot', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
+
 export const loginLoginProvisionedDeviceRpcChannelMap = (configKeys: Array<string>, request: LoginLoginProvisionedDeviceRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.login.loginProvisionedDevice', request)
 
 export const loginLoginProvisionedDeviceRpcPromise = (request: LoginLoginProvisionedDeviceRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.login.loginProvisionedDevice', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
@@ -1119,6 +1151,10 @@ export const metadataRegisterForUpdatesRpcPromise = (request: MetadataRegisterFo
 export const metadataReleaseLockRpcChannelMap = (configKeys: Array<string>, request: MetadataReleaseLockRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.metadata.releaseLock', request)
 
 export const metadataReleaseLockRpcPromise = (request: MetadataReleaseLockRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.metadata.releaseLock', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
+
+export const metadataSetImplicitTeamModeForTestRpcChannelMap = (configKeys: Array<string>, request: MetadataSetImplicitTeamModeForTestRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.metadata.setImplicitTeamModeForTest', request)
+
+export const metadataSetImplicitTeamModeForTestRpcPromise = (request: MetadataSetImplicitTeamModeForTestRpcParam): Promise<void> => new Promise((resolve, reject) => engine()._rpcOutgoing('keybase.1.metadata.setImplicitTeamModeForTest', request, (error: RPCError, result: void) => (error ? reject(error) : resolve())))
 
 export const metadataStartImplicitTeamMigrationRpcChannelMap = (configKeys: Array<string>, request: MetadataStartImplicitTeamMigrationRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.metadata.startImplicitTeamMigration', request)
 
@@ -1518,6 +1554,11 @@ export const simpleFSDirentType = {
   exec: 3,
 }
 
+export const simpleFSListFilter = {
+  noFilter: 0,
+  filterAllHidden: 1,
+}
+
 export const simpleFSOpenFlags = {
   read: 0,
   replace: 1,
@@ -1530,14 +1571,6 @@ export const simpleFSOpenFlags = {
 export const simpleFSPathType = {
   local: 0,
   kbfs: 1,
-}
-
-export const stellarStellarAccountMode = {
-  user: 0,
-}
-
-export const stellarStellarSecretBundleVersion = {
-  v1: 1,
 }
 
 export const teamsCanUserPerformRpcChannelMap = (configKeys: Array<string>, request: TeamsCanUserPerformRpcParam): EngineChannel => engine()._channelMapRpcHelper(configKeys, 'keybase.1.teams.canUserPerform', request)
@@ -1927,7 +1960,7 @@ export type AccountPassphrasePromptRpcParam = $ReadOnly<{guiArg: GUIEntryArg, in
 
 export type AccountResetAccountRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
-export type AnnotatedMemberInfo = $ReadOnly<{userID: UID, teamID: TeamID, username: String, fullName: String, fqName: String, isImplicitTeam: Boolean, isOpenTeam: Boolean, role: TeamRole, implicit?: ?ImplicitRole, needsPUK: Boolean, memberCount: Int, eldestSeqno: Seqno, active: Boolean}>
+export type AnnotatedMemberInfo = $ReadOnly<{userID: UID, teamID: TeamID, username: String, fullName: String, fqName: String, isImplicitTeam: Boolean, isOpenTeam: Boolean, role: TeamRole, implicit?: ?ImplicitRole, needsPUK: Boolean, memberCount: Int, eldestSeqno: Seqno, active: Boolean, allowProfilePromote: Boolean, isMemberShowcased: Boolean}>
 
 export type AnnotatedTeamInvite = $ReadOnly<{role: TeamRole, id: TeamInviteID, type: TeamInviteType, name: TeamInviteName, uv: UserVersion, inviter: UserVersion, inviterUsername: String, teamName: String, userActive: Boolean}>
 
@@ -1948,6 +1981,7 @@ export type AppState =
   | 1 // BACKGROUND_1
   | 2 // INACTIVE_2
   | 3 // BACKGROUNDACTIVE_3
+  | 4 // BACKGROUNDFINAL_4
 
 export type AppStateUpdateAppStateRpcParam = $ReadOnly<{state: AppState, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -1959,6 +1993,14 @@ export type AsyncOps =
   | 4 // COPY_4
   | 5 // MOVE_5
   | 6 // REMOVE_6
+
+export type AvatarFormat = String
+
+export type AvatarUrl = String
+
+export type AvatarsLoadTeamAvatarsRpcParam = $ReadOnly<{names?: ?Array<String>, formats?: ?Array<AvatarFormat>, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+
+export type AvatarsLoadUserAvatarsRpcParam = $ReadOnly<{names?: ?Array<String>, formats?: ?Array<AvatarFormat>, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type BTCRegisterBTCRpcParam = $ReadOnly<{address: String, force: Boolean, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -2171,9 +2213,11 @@ export type DeviceDeviceHistoryListRpcParam = ?$ReadOnly<{incomingCallMap?: Inco
 
 export type DeviceDeviceListRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
-export type DeviceEk = $ReadOnly<{seed: Bytes32, generation: EkGeneration, hashMeta: HashMeta, ctime: Time}>
+export type DeviceEk = $ReadOnly<{seed: Bytes32, metadata: DeviceEkMetadata}>
 
 export type DeviceEkMetadata = $ReadOnly<{kid: KID, hashMeta: HashMeta, generation: EkGeneration, ctime: Time}>
+
+export type DeviceEkStatement = $ReadOnly<{currentDeviceEkMetadata: DeviceEkMetadata, existingDeviceEkMetadata?: ?Array<DeviceEkMetadata>}>
 
 export type DeviceID = String
 
@@ -2181,7 +2225,7 @@ export type DeviceType =
   | 0 // DESKTOP_0
   | 1 // MOBILE_1
 
-export type Dirent = $ReadOnly<{time: Time, size: Int, name: String, direntType: DirentType}>
+export type Dirent = $ReadOnly<{time: Time, size: Int, name: String, direntType: DirentType, lastWriterUnverified: User}>
 
 export type DirentType =
   | 0 // FILE_0
@@ -2212,8 +2256,6 @@ export type Email = $ReadOnly<{email: String, isVerified: Boolean}>
 export type EncryptedBytes32 = any
 
 export type EncryptedGitMetadata = $ReadOnly<{v: Int, e: Bytes, n: BoxNonce, gen: PerTeamKeyGeneration}>
-
-export type EncryptedStellarSecretBundle = $ReadOnly<{v: Int, e: Bytes, n: BoxNonce, gen: PerUserKeyGeneration}>
 
 export type ErrorNum = Int
 
@@ -2426,7 +2468,7 @@ export type HasServerKeysRes = $ReadOnly<{hasServerKeys: Boolean}>
 
 export type HashMeta = Bytes
 
-export type Hello2Res = $ReadOnly<{encryptionKey: KID, sigPayload: HelloRes}>
+export type Hello2Res = $ReadOnly<{encryptionKey: KID, sigPayload: HelloRes, deviceEkKID: KID}>
 
 export type HelloRes = String
 
@@ -2555,6 +2597,8 @@ export type ImplicitTeamConflictInfo = $ReadOnly<{generation: ConflictGeneration
 
 export type ImplicitTeamDisplayName = $ReadOnly<{isPublic: Boolean, writers: ImplicitTeamUserSet, readers: ImplicitTeamUserSet, conflictInfo?: ?ImplicitTeamConflictInfo}>
 
+export type ImplicitTeamMigrationFinalizeMigrationRpcParam = $ReadOnly<{folder: Folder, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+
 export type ImplicitTeamMigrationStartMigrationRpcParam = $ReadOnly<{folder: Folder, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type ImplicitTeamUserSet = $ReadOnly<{keybaseUsers?: ?Array<String>, unresolvedUsers?: ?Array<SocialAssertion>}>
@@ -2614,7 +2658,7 @@ export type KbfsMountGetCurrentMountDirRpcParam = ?$ReadOnly<{incomingCallMap?: 
 
 export type KbfsMountSetCurrentMountDirRpcParam = $ReadOnly<{dir: String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
-export type Kex2Provisionee2DidCounterSign2RpcParam = $ReadOnly<{sig: Bytes, ppsEncrypted: String, pukBox?: ?PerUserKeyBox, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+export type Kex2Provisionee2DidCounterSign2RpcParam = $ReadOnly<{sig: Bytes, ppsEncrypted: String, pukBox?: ?PerUserKeyBox, userEkBox?: ?UserEkBoxed, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type Kex2Provisionee2Hello2RpcParam = $ReadOnly<{uid: UID, token: SessionToken, csrf: CsrfToken, sigBody: String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -2645,13 +2689,19 @@ export type LinkCheckResult = $ReadOnly<{proofId: Int, proofResult: ProofResult,
 
 export type LinkID = String
 
-export type ListArgs = $ReadOnly<{opID: OpID, path: Path}>
+export type ListArgs = $ReadOnly<{opID: OpID, path: Path, filter: ListFilter}>
+
+export type ListFilter =
+  | 0 // NO_FILTER_0
+  | 1 // FILTER_ALL_HIDDEN_1
 
 export type ListResult = $ReadOnly<{files?: ?Array<File>}>
 
+export type LoadAvatarsRes = $ReadOnly<{picmap: {[key: string]: {[key: string]: AvatarUrl}}}>
+
 export type LoadDeviceErr = $ReadOnly<{where: String, desc: String}>
 
-export type LoadTeamArg = $ReadOnly<{ID: TeamID, name: String, public: Boolean, needAdmin: Boolean, refreshUIDMapper: Boolean, refreshers: TeamRefreshers, forceFullReload: Boolean, forceRepoll: Boolean, staleOK: Boolean}>
+export type LoadTeamArg = $ReadOnly<{ID: TeamID, name: String, public: Boolean, needAdmin: Boolean, refreshUIDMapper: Boolean, refreshers: TeamRefreshers, forceFullReload: Boolean, forceRepoll: Boolean, staleOK: Boolean, allowNameLookupBurstCache: Boolean}>
 
 export type LockContext = $ReadOnly<{requireLockID: LockID, releaseAfterSuccess: Boolean}>
 
@@ -2678,6 +2728,8 @@ export type LoginClearStoredSecretRpcParam = $ReadOnly<{username: String, incomi
 export type LoginDeprovisionRpcParam = $ReadOnly<{username: String, doRevoke: Boolean, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type LoginGetConfiguredAccountsRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+
+export type LoginLoginOneshotRpcParam = $ReadOnly<{username: String, paperKey: String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type LoginLoginProvisionedDeviceRpcParam = $ReadOnly<{username: String, noPassphrasePrompt: Boolean, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -2717,7 +2769,7 @@ export type MDPriority = Int
 
 export type MaskB64 = Bytes
 
-export type MemberInfo = $ReadOnly<{userID: UID, teamID: TeamID, fqName: String, isImplicitTeam: Boolean, isOpenTeam: Boolean, role: TeamRole, implicit?: ?ImplicitRole, memberCount: Int}>
+export type MemberInfo = $ReadOnly<{userID: UID, teamID: TeamID, fqName: String, isImplicitTeam: Boolean, isOpenTeam: Boolean, role: TeamRole, implicit?: ?ImplicitRole, memberCount: Int, allowProfilePromote: Boolean, isMemberShowcased: Boolean}>
 
 export type MerkleGetCurrentMerkleRootRpcParam = $ReadOnly<{freshnessMsec: Int, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -2779,6 +2831,8 @@ export type MetadataReleaseLockRpcParam = $ReadOnly<{folderID: String, lockID: L
 
 export type MetadataResponse = $ReadOnly<{folderID: String, mdBlocks?: ?Array<MDBlock>}>
 
+export type MetadataSetImplicitTeamModeForTestRpcParam = $ReadOnly<{implicitTeamMode: String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+
 export type MetadataStartImplicitTeamMigrationRpcParam = $ReadOnly<{folderID: String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type MetadataTruncateLockRpcParam = $ReadOnly<{folderID: String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
@@ -2801,13 +2855,15 @@ export type NaclSigningKeyPrivate = any
 
 export type NaclSigningKeyPublic = any
 
-export type NotificationChannels = $ReadOnly<{session: Boolean, users: Boolean, kbfs: Boolean, tracking: Boolean, favorites: Boolean, paperkeys: Boolean, keyfamily: Boolean, service: Boolean, app: Boolean, chat: Boolean, pgp: Boolean, kbfsrequest: Boolean, badges: Boolean, reachability: Boolean, team: Boolean}>
+export type NotificationChannels = $ReadOnly<{session: Boolean, users: Boolean, kbfs: Boolean, tracking: Boolean, favorites: Boolean, paperkeys: Boolean, keyfamily: Boolean, service: Boolean, app: Boolean, chat: Boolean, pgp: Boolean, kbfsrequest: Boolean, badges: Boolean, reachability: Boolean, team: Boolean, ephemeral: Boolean}>
 
 export type NotifyAppExitRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type NotifyBadgesBadgeStateRpcParam = $ReadOnly<{badgeState: BadgeState, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type NotifyCtlSetNotificationsRpcParam = $ReadOnly<{channels: NotificationChannels, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+
+export type NotifyEphemeralNewTeamEkRpcParam = $ReadOnly<{id: TeamID, generation: EkGeneration, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type NotifyFSFSActivityRpcParam = $ReadOnly<{notification: FSNotification, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -3372,11 +3428,13 @@ export type SimpleFSSimpleFSCopyRecursiveRpcParam = $ReadOnly<{opID: OpID, src: 
 
 export type SimpleFSSimpleFSCopyRpcParam = $ReadOnly<{opID: OpID, src: Path, dest: Path, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
+export type SimpleFSSimpleFSDumpDebuggingInfoRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+
 export type SimpleFSSimpleFSGetOpsRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
-export type SimpleFSSimpleFSListRecursiveRpcParam = $ReadOnly<{opID: OpID, path: Path, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+export type SimpleFSSimpleFSListRecursiveRpcParam = $ReadOnly<{opID: OpID, path: Path, filter: ListFilter, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
-export type SimpleFSSimpleFSListRpcParam = $ReadOnly<{opID: OpID, path: Path, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+export type SimpleFSSimpleFSListRpcParam = $ReadOnly<{opID: OpID, path: Path, filter: ListFilter, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type SimpleFSSimpleFSMakeOpidRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -3395,6 +3453,8 @@ export type SimpleFSSimpleFSRenameRpcParam = $ReadOnly<{src: Path, dest: Path, i
 export type SimpleFSSimpleFSSetStatRpcParam = $ReadOnly<{dest: Path, flag: DirentType, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type SimpleFSSimpleFSStatRpcParam = $ReadOnly<{path: Path, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+
+export type SimpleFSSimpleFSSyncStatusRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type SimpleFSSimpleFSWaitRpcParam = $ReadOnly<{opID: OpID, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -3556,24 +3616,13 @@ export type StatusCode =
   | 2711 // SCTeamShowcasePermDenied_2711
   | 2721 // SCTeamProvisionalCanKey_2721
   | 2722 // SCTeamProvisionalCannotKey_2722
-
-export type StellarAccountID = String
-
-export type StellarAccountMode = 0 // USER_0
-
-export type StellarRevision = Uint64
-
-export type StellarSecretBundle = $ReadOnly<{revision: StellarRevision, accounts?: ?Array<StellarSecretEntry>}>
-
-export type StellarSecretBundleV1 = $ReadOnly<{revision: StellarRevision, accounts?: ?Array<StellarSecretEntry>}>
-
-export type StellarSecretBundleVersion = 1 // V1_1
-
-export type StellarSecretBundleVersioned = {version: 1, v1: ?StellarSecretBundleV1}
-
-export type StellarSecretEntry = $ReadOnly<{accountID: StellarAccountID, mode: StellarAccountMode, signers?: ?Array<StellarSecretKey>, isPrimary: Boolean, name: String}>
-
-export type StellarSecretKey = String
+  | 3100 // SCStellarError_3100
+  | 3101 // SCStellarBadInput_3101
+  | 3102 // SCStellarWrongRevision_3102
+  | 3103 // SCStellarMissingBundle_3103
+  | 3104 // SCStellarBadPuk_3104
+  | 3105 // SCStellarMissingAccount_3105
+  | 3106 // SCStellarBadPrev_3106
 
 export type Stream = $ReadOnly<{fd: Int}>
 
@@ -3634,7 +3683,9 @@ export type TeamApplication =
 
 export type TeamApplicationKey = $ReadOnly<{application: TeamApplication, keyGeneration: PerTeamKeyGeneration, key: Bytes32}>
 
-export type TeamCLKRMsg = $ReadOnly<{teamID: TeamID, generation: PerTeamKeyGeneration, score: Int}>
+export type TeamCLKRMsg = $ReadOnly<{teamID: TeamID, generation: PerTeamKeyGeneration, score: Int, resetUsersUntrusted?: ?Array<TeamCLKRResetUser>}>
+
+export type TeamCLKRResetUser = $ReadOnly<{uid: UID, userEldestSeqno: Seqno, memberEldestSeqno: Seqno}>
 
 export type TeamChangeReq = $ReadOnly<{owners?: ?Array<UserVersion>, admins?: ?Array<UserVersion>, writers?: ?Array<UserVersion>, readers?: ?Array<UserVersion>, none?: ?Array<UserVersion>, completedInvites: {[key: string]: UserVersionPercentForm}}>
 
@@ -3649,6 +3700,16 @@ export type TeamData = $ReadOnly<{secretless: Boolean, name: TeamName, chain: Te
 export type TeamDebugRes = $ReadOnly<{chain: TeamSigChainState}>
 
 export type TeamDetails = $ReadOnly<{members: TeamMembersDetails, keyGeneration: PerTeamKeyGeneration, annotatedActiveInvites: {[key: string]: AnnotatedTeamInvite}, settings: TeamSettings, showcase: TeamShowcase}>
+
+export type TeamEk = $ReadOnly<{seed: Bytes32, metadata: TeamEkMetadata}>
+
+export type TeamEkBoxMetadata = $ReadOnly<{box: String, recipientGeneration: EkGeneration, recipientUID: UID}>
+
+export type TeamEkBoxed = $ReadOnly<{box: String, userEkGeneration: EkGeneration, metadata: TeamEkMetadata}>
+
+export type TeamEkMetadata = $ReadOnly<{kid: KID, hashMeta: HashMeta, generation: EkGeneration, ctime: Time}>
+
+export type TeamEkStatement = $ReadOnly<{currentTeamEkMetadata: TeamEkMetadata, existingTeamEkMetadata?: ?Array<TeamEkMetadata>}>
 
 export type TeamEncryptedKBFSKeyset = $ReadOnly<{v: Int, e: Bytes, n: Bytes}>
 
@@ -3712,7 +3773,7 @@ export type TeamNamePart = String
 
 export type TeamOpenReqMsg = $ReadOnly<{teamID: TeamID, tars?: ?Array<TeamAccessRequest>}>
 
-export type TeamOperation = $ReadOnly<{manageMembers: Boolean, manageSubteams: Boolean, createChannel: Boolean, deleteChannel: Boolean, renameChannel: Boolean, editChannelDescription: Boolean, setTeamShowcase: Boolean, setMemberShowcase: Boolean, changeOpenTeam: Boolean, leaveTeam: Boolean, joinTeam: Boolean, setPublicityAny: Boolean, listFirst: Boolean, changeTarsDisabled: Boolean, deleteChatHistory: Boolean}>
+export type TeamOperation = $ReadOnly<{manageMembers: Boolean, manageSubteams: Boolean, createChannel: Boolean, chat: Boolean, deleteChannel: Boolean, renameChannel: Boolean, editChannelDescription: Boolean, setTeamShowcase: Boolean, setMemberShowcase: Boolean, setRetentionPolicy: Boolean, changeOpenTeam: Boolean, leaveTeam: Boolean, joinTeam: Boolean, setPublicityAny: Boolean, listFirst: Boolean, changeTarsDisabled: Boolean, deleteChatHistory: Boolean}>
 
 export type TeamPlusApplicationKeys = $ReadOnly<{id: TeamID, name: String, implicit: Boolean, public: Boolean, application: TeamApplication, writers?: ?Array<UserVersion>, onlyReaders?: ?Array<UserVersion>, applicationKeys?: ?Array<TeamApplicationKey>}>
 
@@ -3806,7 +3867,7 @@ export type TeamsTeamLeaveRpcParam = $ReadOnly<{name: String, permanent: Boolean
 
 export type TeamsTeamListMyAccessRequestsRpcParam = $ReadOnly<{teamName?: ?String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
-export type TeamsTeamListRequestsRpcParam = ?$ReadOnly<{incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
+export type TeamsTeamListRequestsRpcParam = $ReadOnly<{teamName?: ?String, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
 export type TeamsTeamListSubteamsRecursiveRpcParam = $ReadOnly<{parentTeamName: String, forceRepoll: Boolean, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -3931,9 +3992,15 @@ export type User = $ReadOnly<{uid: UID, username: String}>
 
 export type UserCard = $ReadOnly<{following: Int, followers: Int, uid: UID, fullName: String, location: String, bio: String, website: String, twitter: String, youFollowThem: Boolean, theyFollowYou: Boolean, teamShowcase?: ?Array<UserTeamShowcase>}>
 
-export type UserEk = $ReadOnly<{seed: Bytes32, generation: EkGeneration, hashMeta: HashMeta, ctime: Time}>
+export type UserEk = $ReadOnly<{seed: Bytes32, metadata: UserEkMetadata}>
+
+export type UserEkBoxMetadata = $ReadOnly<{box: String, recipientGeneration: EkGeneration, recipientDeviceID: DeviceID}>
+
+export type UserEkBoxed = $ReadOnly<{box: String, deviceEkGeneration: EkGeneration, metadata: UserEkMetadata}>
 
 export type UserEkMetadata = $ReadOnly<{kid: KID, hashMeta: HashMeta, generation: EkGeneration, ctime: Time}>
+
+export type UserEkStatement = $ReadOnly<{currentUserEkMetadata: UserEkMetadata, existingUserEkMetadata?: ?Array<UserEkMetadata>}>
 
 export type UserGetUPAKRpcParam = $ReadOnly<{uid: UID, incomingCallMap?: IncomingCallMapType, waitingHandler?: WaitingHandlerType}>
 
@@ -4025,6 +4092,8 @@ type ApiserverGetResult = APIRes
 type ApiserverGetWithSessionResult = APIRes
 type ApiserverPostJSONResult = APIRes
 type ApiserverPostResult = APIRes
+type AvatarsLoadTeamAvatarsResult = LoadAvatarsRes
+type AvatarsLoadUserAvatarsResult = LoadAvatarsRes
 type BadgerGetBadgeStateResult = BadgeState
 type BlockArchiveReferenceResult = ?Array<BlockReference>
 type BlockArchiveReferenceWithCountResult = DowngradeReferenceRes
@@ -4148,6 +4217,7 @@ type SimpleFSSimpleFSMakeOpidResult = OpID
 type SimpleFSSimpleFSReadListResult = SimpleFSListResult
 type SimpleFSSimpleFSReadResult = FileContent
 type SimpleFSSimpleFSStatResult = Dirent
+type SimpleFSSimpleFSSyncStatusResult = FSSyncStatus
 type StreamUiReadResult = Bytes
 type StreamUiWriteResult = Int
 type TeamsCanUserPerformResult = TeamOperation
@@ -4207,7 +4277,7 @@ type UserLoadUserResult = User
 type UserMeUserVersionResult = UserVersion
 type UserSearchResult = ?Array<SearchResult>
 
-export type IncomingCallMapType = {
+export type IncomingCallMapType = {|
   'keybase.1.gpgUi.wantToAddGPGKey'?: (params: $ReadOnly<{sessionID: Int}>, response: {error: RPCErrorHandler, result: (result: GpgUiWantToAddGPGKeyResult) => void}) => void,
   'keybase.1.gpgUi.confirmDuplicateKeyChosen'?: (params: $ReadOnly<{sessionID: Int}>, response: {error: RPCErrorHandler, result: (result: GpgUiConfirmDuplicateKeyChosenResult) => void}) => void,
   'keybase.1.gpgUi.selectKeyAndPushOption'?: (params: $ReadOnly<{sessionID: Int, keys?: ?Array<GPGKey>}>, response: {error: RPCErrorHandler, result: (result: GpgUiSelectKeyAndPushOptionResult) => void}) => void,
@@ -4241,6 +4311,7 @@ export type IncomingCallMapType = {
   'keybase.1.logsend.prepareLogsend'?: (params: $ReadOnly<{}>, response: CommonResponseHandler) => void,
   'keybase.1.NotifyApp.exit'?: (params: $ReadOnly<{}>, response: CommonResponseHandler) => void,
   'keybase.1.NotifyBadges.badgeState'?: (params: $ReadOnly<{badgeState: BadgeState}>) => void,
+  'keybase.1.NotifyEphemeral.newTeamEk'?: (params: $ReadOnly<{id: TeamID, generation: EkGeneration}>) => void,
   'keybase.1.NotifyFavorites.favoritesChanged'?: (params: $ReadOnly<{uid: UID}>) => void,
   'keybase.1.NotifyFS.FSActivity'?: (params: $ReadOnly<{notification: FSNotification}>) => void,
   'keybase.1.NotifyFS.FSSyncActivity'?: (params: $ReadOnly<{status: FSPathSyncStatus}>, response: CommonResponseHandler) => void,
@@ -4296,4 +4367,4 @@ export type IncomingCallMapType = {
   'keybase.1.teamsUi.confirmRootTeamDelete'?: (params: $ReadOnly<{sessionID: Int, teamName: String}>, response: {error: RPCErrorHandler, result: (result: TeamsUiConfirmRootTeamDeleteResult) => void}) => void,
   'keybase.1.teamsUi.confirmSubteamDelete'?: (params: $ReadOnly<{sessionID: Int, teamName: String}>, response: {error: RPCErrorHandler, result: (result: TeamsUiConfirmSubteamDeleteResult) => void}) => void,
   'keybase.1.ui.promptYesNo'?: (params: $ReadOnly<{sessionID: Int, text: Text, promptDefault: PromptDefault}>, response: {error: RPCErrorHandler, result: (result: UiPromptYesNoResult) => void}) => void,
-}
+|}

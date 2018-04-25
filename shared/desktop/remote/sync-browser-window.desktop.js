@@ -11,19 +11,6 @@ import {showDevTools, skipSecondaryDevtools} from '../../local-debug.desktop'
 const BrowserWindow = electron.BrowserWindow || electron.remote.BrowserWindow
 const ipcRenderer = electron.ipcRenderer
 
-const devScripts = __DEV__
-  ? [
-      {
-        async: false,
-        src: resolveRootAsURL('dist', 'dll/dll.vendor.js'),
-      },
-      {
-        async: false,
-        src: hotPath('common-chunks.js'),
-      },
-    ]
-  : []
-
 type Props = {
   windowOpts: Object,
   windowPositionBottomRight: boolean,
@@ -33,6 +20,7 @@ type Props = {
 }
 
 const defaultWindowOpts = {
+  nodeIntegration: false,
   frame: false,
   fullscreen: false,
   height: 300,
@@ -49,7 +37,6 @@ const sendLoad = (webContents: any, windowParam: string, windowComponent: string
   webContents.send('load', {
     windowComponent,
     scripts: [
-      ...devScripts,
       {
         async: false,
         src: hotPath('component-loader.bundle.js'),
@@ -127,7 +114,7 @@ function SyncBrowserWindow(ComposedComponent: any) {
       }
     }
 
-    componentWillMount() {
+    componentDidMount() {
       const remoteWindow = this._makeBrowserWindow()
 
       // Keep remoteWindowId since remoteWindow properties are not accessible if destroyed

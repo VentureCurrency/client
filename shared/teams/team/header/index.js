@@ -6,13 +6,15 @@ import {Box, Button, ButtonBar, Icon, Meta, NameWithIcon, Text} from '../../../c
 import {globalColors, globalMargins, globalStyles, isMobile} from '../../../styles'
 
 export type Props = {
+  canChat: boolean,
   canEditDescription: boolean,
   canJoinTeam: boolean,
   canManageMembers: boolean,
   description: string,
+  loading?: boolean,
   memberCount: number,
   openTeam: boolean,
-  role: ?Types.TeamRoleType,
+  role: Types.MaybeTeamRoleType,
   teamname: Types.Teamname,
   onAddPeople: (target?: any) => void,
   onAddSelf: () => void,
@@ -47,7 +49,7 @@ const TeamHeader = (props: Props) => (
         metaOne={
           <Box style={globalStyles.flexBoxRow}>
             <Text type="BodySmall">TEAM</Text>
-            {props.openTeam && <Meta style={stylesMeta} title="OPEN" />}
+            {props.openTeam && <Meta style={stylesMeta} title="open" backgroundColor={globalColors.green} />}
           </Box>
         }
         metaTwo={getTeamSubtitle(props.memberCount, props.role)}
@@ -72,15 +74,17 @@ const TeamHeader = (props: Props) => (
 
       {/* Actions */}
       <ButtonBar direction="row" style={isMobile ? {width: 'auto', marginBottom: -8} : undefined}>
-        <Button type="Primary" label="Chat" onClick={props.onChat}>
-          <Icon
-            type="iconfont-chat"
-            style={{
-              marginRight: 8,
-              color: globalColors.white,
-            }}
-          />
-        </Button>
+        {props.canChat && (
+          <Button type="Primary" label="Chat" onClick={props.onChat}>
+            <Icon
+              type="iconfont-chat"
+              style={{
+                marginRight: 8,
+                color: globalColors.white,
+              }}
+            />
+          </Button>
+        )}
         {props.canManageMembers && (
           <Button
             type="Secondary"
@@ -124,7 +128,7 @@ const TeamHeader = (props: Props) => (
   </Box>
 )
 
-const getTeamSubtitle = (memberCount: number, role: ?(Types.TeamRoleType | 'none')): string => {
+const getTeamSubtitle = (memberCount: number, role: Types.MaybeTeamRoleType): string => {
   let res = `${memberCount} member`
   if (memberCount !== 1) {
     res += 's'
@@ -174,7 +178,6 @@ const stylesTeamHeader = {
 
 const stylesMeta = {
   alignSelf: 'center',
-  backgroundColor: globalColors.green,
   borderRadius: 1,
   marginLeft: globalMargins.tiny,
   marginTop: 1,

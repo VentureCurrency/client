@@ -461,6 +461,22 @@ func FilterByType(msgs []chat1.MessageUnboxed, query *chat1.GetThreadQuery, incl
 	return res
 }
 
+// Filter messages that are both exploded that are no longer shown in the GUI
+// (as ash lines)
+func FilterExploded(msgs []chat1.MessageUnboxed) (res []chat1.MessageUnboxed) {
+	now := time.Now()
+	for _, msg := range msgs {
+		if msg.IsValid() {
+			mvalid := msg.Valid()
+			if mvalid.IsExploding() && mvalid.HideExplosion(now) {
+				continue
+			}
+		}
+		res = append(res, msg)
+	}
+	return msgs
+}
+
 // GetSupersedes must be called with a valid msg
 func GetSupersedes(msg chat1.MessageUnboxed) ([]chat1.MessageID, error) {
 	if !msg.IsValidFull() {
@@ -707,12 +723,12 @@ func GetConvMtimeLocal(conv chat1.ConversationLocal) gregor1.Time {
 	return msg.Valid().ServerHeader.Ctime
 }
 
-func GetConvSnippet(conv chat1.ConversationLocal) string {
+func GetConvSnippet(conv chat1.ConversationLocal, currentUsername string) string {
 	msg, err := PickLatestMessageUnboxed(conv, VisibleChatMessageTypes())
 	if err != nil {
 		return ""
 	}
-	return GetMsgSnippet(msg)
+	return GetMsgSnippet(msg, conv, currentUsername)
 }
 
 func GetMsgSummaryByType(msgs []chat1.MessageSummary, typ chat1.MessageType) (chat1.MessageSummary, error) {
@@ -743,15 +759,25 @@ func systemMessageSnippet(msg chat1.MessageSystem) string {
 	}
 }
 
-func GetMsgSnippet(msg chat1.MessageUnboxed) string {
+func GetMsgSnippet(msg chat1.MessageUnboxed, conv chat1.ConversationLocal, currentUsername string) string {
 	if !msg.IsValidFull() {
 		return ""
 	}
+	var prefix string
+	switch conv.GetMembersType() {
+	case chat1.ConversationMembersType_TEAM:
+		sender := msg.Valid().SenderUsername
+		if sender == currentUsername {
+			prefix = "You: "
+		} else {
+			prefix = fmt.Sprintf("%s: ", sender)
+		}
+	}
 	switch msg.GetMessageType() {
 	case chat1.MessageType_TEXT:
-		return msg.Valid().MessageBody.Text().Body
+		return prefix + msg.Valid().MessageBody.Text().Body
 	case chat1.MessageType_ATTACHMENT:
-		return msg.Valid().MessageBody.Attachment().Object.Title
+		return prefix + msg.Valid().MessageBody.Attachment().Object.Title
 	case chat1.MessageType_SYSTEM:
 		return systemMessageSnippet(msg.Valid().MessageBody.System())
 	}
@@ -804,7 +830,7 @@ func PresentConversationErrorLocal(rawConv chat1.ConversationErrorLocal) (res ch
 	return res
 }
 
-func PresentConversationLocal(rawConv chat1.ConversationLocal) (res chat1.InboxUIItem) {
+func PresentConversationLocal(rawConv chat1.ConversationLocal, currentUsername string) (res chat1.InboxUIItem) {
 	var writerNames []string
 	fullNames := make(map[string]string)
 	for _, p := range rawConv.Info.Participants {
@@ -815,7 +841,7 @@ func PresentConversationLocal(rawConv chat1.ConversationLocal) (res chat1.InboxU
 	}
 	res.ConvID = rawConv.GetConvID().String()
 	res.Name = rawConv.Info.TlfName
-	res.Snippet = GetConvSnippet(rawConv)
+	res.Snippet = GetConvSnippet(rawConv, currentUsername)
 	res.Channel = GetTopicName(rawConv)
 	res.Headline = GetHeadline(rawConv)
 	res.Participants = writerNames
@@ -840,18 +866,18 @@ func PresentConversationLocal(rawConv chat1.ConversationLocal) (res chat1.InboxU
 	return res
 }
 
-func PresentConversationLocals(convs []chat1.ConversationLocal) (res []chat1.InboxUIItem) {
+func PresentConversationLocals(convs []chat1.ConversationLocal, currentUsername string) (res []chat1.InboxUIItem) {
 	for _, conv := range convs {
-		res = append(res, PresentConversationLocal(conv))
+		res = append(res, PresentConversationLocal(conv, currentUsername))
 	}
 	return res
 }
 
-func PresentThreadView(ctx context.Context, uid gregor1.UID, tv chat1.ThreadView,
-	tcs types.TeamChannelSource) (res chat1.UIMessages) {
+func PresentThreadView(ctx context.Context, g *globals.Context, uid gregor1.UID, tv chat1.ThreadView,
+	convID chat1.ConversationID) (res chat1.UIMessages) {
 	res.Pagination = PresentPagination(tv.Pagination)
 	for _, msg := range tv.Messages {
-		res.Messages = append(res.Messages, PresentMessageUnboxed(ctx, msg, uid, tcs))
+		res.Messages = append(res.Messages, PresentMessageUnboxed(ctx, g, msg, uid, convID))
 	}
 	return res
 }
@@ -870,8 +896,44 @@ func presentChannelNameMentions(ctx context.Context, crs []chat1.ChannelNameMent
 	return res
 }
 
-func PresentMessageUnboxed(ctx context.Context, rawMsg chat1.MessageUnboxed, uid gregor1.UID,
-	tcs types.TeamChannelSource) (res chat1.UIMessage) {
+func presentAttachmentAssetInfo(ctx context.Context, g *globals.Context, msg chat1.MessageUnboxed,
+	convID chat1.ConversationID) *chat1.UIAssetUrlInfo {
+	body := msg.Valid().MessageBody
+	typ, err := body.MessageType()
+	if err != nil {
+		return nil
+	}
+	switch typ {
+	case chat1.MessageType_ATTACHMENT, chat1.MessageType_ATTACHMENTUPLOADED:
+		var hasFullURL, hasPreviewURL bool
+		var info chat1.UIAssetUrlInfo
+		if typ == chat1.MessageType_ATTACHMENT {
+			info.MimeType = body.Attachment().Object.MimeType
+			hasFullURL = body.Attachment().Object.Path != ""
+			hasPreviewURL = body.Attachment().Preview != nil &&
+				body.Attachment().Preview.Path != ""
+		} else {
+			info.MimeType = body.Attachmentuploaded().Object.MimeType
+			hasFullURL = body.Attachmentuploaded().Object.Path != ""
+			hasPreviewURL = len(body.Attachmentuploaded().Previews) > 0 &&
+				body.Attachmentuploaded().Previews[0].Path != ""
+		}
+		if hasFullURL {
+			info.FullUrl = g.AttachmentURLSrv.GetURL(ctx, convID, msg.GetMessageID(), false)
+		}
+		if hasPreviewURL {
+			info.PreviewUrl = g.AttachmentURLSrv.GetURL(ctx, convID, msg.GetMessageID(), true)
+		}
+		if info.FullUrl == "" && info.PreviewUrl == "" && info.MimeType == "" {
+			return nil
+		}
+		return &info
+	}
+	return nil
+}
+
+func PresentMessageUnboxed(ctx context.Context, g *globals.Context, rawMsg chat1.MessageUnboxed,
+	uid gregor1.UID, convID chat1.ConversationID) (res chat1.UIMessage) {
 
 	miscErr := func(err error) chat1.UIMessage {
 		return chat1.NewUIMessageWithError(chat1.MessageUnboxedError{
@@ -910,6 +972,8 @@ func PresentMessageUnboxed(ctx context.Context, rawMsg chat1.MessageUnboxed, uid
 			AtMentions:            valid.AtMentionUsernames,
 			ChannelMention:        valid.ChannelMention,
 			ChannelNameMentions:   presentChannelNameMentions(ctx, valid.ChannelNameMentions),
+			AssetUrlInfo:          presentAttachmentAssetInfo(ctx, g, rawMsg, convID),
+			EphemeralMetadata:     valid.EphemeralMetadata(),
 		})
 	case chat1.MessageUnboxedState_OUTBOX:
 		var body string

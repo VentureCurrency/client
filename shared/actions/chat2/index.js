@@ -15,6 +15,7 @@ import * as SearchGen from '../search-gen'
 import * as TeamsGen from '../teams-gen'
 import * as Types from '../../constants/types/chat2'
 import * as UsersGen from '../users-gen'
+import {hasCanPerform, retentionPolicyToServiceRetentionPolicy} from '../../constants/teams'
 import type {NavigateActions} from '../../constants/types/route-tree'
 import engine from '../../engine'
 import logger from '../../logger'
@@ -23,8 +24,8 @@ import {chatTab} from '../../constants/tabs'
 import {isMobile} from '../../constants/platform'
 import {getPath} from '../../route-tree'
 import {NotifyPopup} from '../../native/notifications'
-import {showMainWindow, saveAttachmentDialog, showShareActionSheet} from '../platform-specific'
-import {tmpDir, tmpFile, stat, downloadFilePathNoSearch, downloadFilePath, copy} from '../../util/file'
+import {showMainWindow, saveAttachmentDialog, downloadAndShowShareActionSheet} from '../platform-specific'
+import {tmpDir, downloadFilePath} from '../../util/file'
 import {privateFolderWithUsers, teamFolder} from '../../constants/config'
 import {parseFolderNameToUsers} from '../../util/kbfs'
 import flags from '../../util/feature-flags'
@@ -57,8 +58,13 @@ const inboxRefresh = (
         const metas = items
           .map(item => Constants.unverifiedInboxUIItemToConversationMeta(item, username))
           .filter(Boolean)
-
-        yield Saga.put(Chat2Gen.createMetasReceived({metas}))
+        // Check if some of our existing stored metas might no longer be valid
+        const clearExistingMetas =
+          action.type === Chat2Gen.inboxRefresh &&
+          ['inboxSyncedClear', 'leftAConversation'].includes(action.payload.reason)
+        const clearExistingMessages =
+          action.type === Chat2Gen.inboxRefresh && action.payload.reason === 'inboxSyncedClear'
+        yield Saga.put(Chat2Gen.createMetasReceived({metas, clearExistingMessages, clearExistingMetas}))
         return EngineRpc.rpcResult()
       },
     },
@@ -165,7 +171,7 @@ const unboxRows = (
     const inboxUIItem: RPCChatTypes.InboxUIItem = JSON.parse(conv)
     const meta = Constants.inboxUIItemToConversationMeta(inboxUIItem)
     if (meta) {
-      yield Saga.put(Chat2Gen.createMetasReceived({metas: [meta]}))
+      yield Saga.put(Chat2Gen.createMetasReceived({metas: [meta], neverCreate: true}))
     } else {
       yield Saga.put(
         Chat2Gen.createMetaReceivedError({
@@ -316,14 +322,20 @@ const chatActivityToMetasAction = (payload: ?{+conv?: ?RPCChatTypes.InboxUIItem}
       RPCChatTypes.commonConversationStatus.reported,
     ].includes(conv.status) ||
       conv.isEmpty)
+
+  // We want to select a different convo if its cause we ignored/blocked/reported. Otherwise sometimes we get that a convo
+  // is empty which we don't want to select something else as sometimes we're in the middle of making it!
+  const selectSomethingElse = conv ? !conv.isEmpty : false
   return meta
     ? [
         isADelete
-          ? Chat2Gen.createMetaDelete({conversationIDKey: meta.conversationIDKey})
+          ? Chat2Gen.createMetaDelete({conversationIDKey: meta.conversationIDKey, selectSomethingElse})
           : Chat2Gen.createMetasReceived({metas: [meta]}),
         UsersGen.createUpdateFullnames({usernameToFullname}),
       ]
-    : conversationIDKey && isADelete ? [Chat2Gen.createMetaDelete({conversationIDKey})] : []
+    : conversationIDKey && isADelete
+      ? [Chat2Gen.createMetaDelete({conversationIDKey, selectSomethingElse})]
+      : []
 }
 
 // We got errors from the service
@@ -429,7 +441,10 @@ const onChatThreadStale = updates => {
     return arr
   }, [])
   if (conversationIDKeys.length > 0) {
-    return [Chat2Gen.createMarkConversationsStale({conversationIDKeys})]
+    return [
+      Chat2Gen.createMarkConversationsStale({conversationIDKeys}),
+      Chat2Gen.createMetaNeedsUpdating({conversationIDKeys, reason: 'onChatThreadStale'}),
+    ]
   }
 }
 
@@ -495,6 +510,16 @@ const setupChatHandlers = () => {
             : null
         case RPCChatTypes.notifyChatChatActivityType.teamtype:
           return [Chat2Gen.createInboxRefresh({reason: 'teamTypeChanged'})]
+        case RPCChatTypes.notifyChatChatActivityType.expunge:
+          const expungeInfo: ?RPCChatTypes.ExpungeInfo = activity.expunge
+          return expungeInfo
+            ? [
+                Chat2Gen.createMessagesWereDeleted({
+                  conversationIDKey: Types.conversationIDToKey(expungeInfo.convID),
+                  upToMessageID: expungeInfo.expunge.upto,
+                }),
+              ]
+            : null
         default:
           break
       }
@@ -543,13 +568,36 @@ const setupChatHandlers = () => {
   engine().setIncomingActionCreators('chat.1.NotifyChat.ChatLeftConversation', () => [
     Chat2Gen.createInboxRefresh({reason: 'leftAConversation'}),
   ])
+  engine().setIncomingActionCreators('chat.1.NotifyChat.ChatSetConvRetention', update => {
+    if (update.conv) {
+      return [Chat2Gen.createUpdateConvRetentionPolicy({conv: update.conv})]
+    }
+    logger.warn(
+      'ChatHandler: got NotifyChat.ChatSetConvRetention with no attached InboxUIItem. Forcing update.'
+    )
+    // force to get the new retention policy
+    return [
+      Chat2Gen.createMetaRequestTrusted({
+        conversationIDKeys: [Types.conversationIDToKey(update.convID)],
+        force: true,
+      }),
+    ]
+  })
+  engine().setIncomingActionCreators('chat.1.NotifyChat.ChatSetTeamRetention', update => {
+    if (update.convs) {
+      return [Chat2Gen.createUpdateTeamRetentionPolicy({convs: update.convs})]
+    }
+    // this is a more serious problem, but we don't need to bug the user about it
+    logger.error(
+      'ChatHandler: got NotifyChat.ChatSetTeamRetention with no attached InboxUIItems. The local version may be out of date'
+    )
+  })
 }
 
 const loadThreadMessageTypes = Object.keys(RPCChatTypes.commonMessageType).reduce((arr, key) => {
   switch (key) {
     case 'edit': // daemon filters this out for us so we can ignore
     case 'delete':
-    case 'headline':
     case 'attachmentuploaded':
       break
     default:
@@ -560,13 +608,16 @@ const loadThreadMessageTypes = Object.keys(RPCChatTypes.commonMessageType).reduc
   return arr
 }, [])
 
+// We bookkeep the current request's paginationkey in case we get very slow callbacks so we we can ignore new paginationKeys that are too old
+const _loadingMessagesWithPaginationKey = {}
 // Load new messages on a thread. We call this when you select a conversation, we get a thread-is-stale notification, or when you scroll up and want more messages
 const loadMoreMessages = (
   action:
     | Chat2Gen.SelectConversationPayload
     | Chat2Gen.LoadOlderMessagesDueToScrollPayload
     | Chat2Gen.SetPendingConversationUsersPayload
-    | Chat2Gen.MarkConversationsStalePayload,
+    | Chat2Gen.MarkConversationsStalePayload
+    | Chat2Gen.MetasReceivedPayload,
   state: TypedState
 ) => {
   const numMessagesOnInitialLoad = isMobile ? 20 : 50
@@ -591,6 +642,12 @@ const loadMoreMessages = (
   } else if (action.type === Chat2Gen.selectConversation) {
     key = action.payload.conversationIDKey
     reason = action.payload.reason || 'selected'
+  } else if (action.type === Chat2Gen.metasReceived) {
+    if (!action.payload.clearExistingMessages) {
+      // we didn't clear anything out, we don't need to fetch anything
+      return
+    }
+    key = Constants.getSelectedConversation(state)
   } else {
     key = action.payload.conversationIDKey
   }
@@ -623,10 +680,18 @@ const loadMoreMessages = (
 
   if (action.type === Chat2Gen.loadOlderMessagesDueToScroll) {
     paginationKey = meta.paginationKey
+    // no more to load
+    if (!paginationKey) {
+      logger.info('Load thread bail: scrolling back and no pagination key')
+      return
+    }
     numberOfMessagesToLoad = numMessagesOnScrollback
   } else {
     numberOfMessagesToLoad = numMessagesOnInitialLoad
   }
+
+  // Update bookkeeping
+  _loadingMessagesWithPaginationKey[Types.conversationIDKeyToString(conversationIDKey)] = paginationKey
 
   // we clear on the first callback. we sometimes don't get a cached context
   let calledClear = false
@@ -649,15 +714,22 @@ const loadMoreMessages = (
         return arr
       }, [])
 
-      if (context === 'cached') {
+      // Still loading this conversation w/ this paginationKey?
+      if (
+        _loadingMessagesWithPaginationKey[Types.conversationIDKeyToString(conversationIDKey)] ===
+        paginationKey
+      ) {
+        let newPaginationKey = Types.stringToPaginationKey(
+          (uiMessages.pagination && uiMessages.pagination.next) || ''
+        )
+
+        if (context === 'full') {
+          const paginationMoreToLoad = uiMessages.pagination ? !uiMessages.pagination.last : true
+          // if last is true on the full payload we blow away paginationKey
+          newPaginationKey = paginationMoreToLoad ? newPaginationKey : Types.stringToPaginationKey('')
+        }
         yield Saga.put(
-          Chat2Gen.createMetaUpdatePagination({
-            conversationIDKey,
-            paginationKey: Types.stringToPaginationKey(
-              (uiMessages.pagination && uiMessages.pagination.next) || ''
-            ),
-            paginationMoreToLoad: uiMessages.pagination ? !uiMessages.pagination.last : true,
-          })
+          Chat2Gen.createMetaUpdatePagination({conversationIDKey, paginationKey: newPaginationKey})
         )
       }
 
@@ -715,7 +787,7 @@ const loadMoreMessages = (
         messageTypes: loadThreadMessageTypes,
       },
       reason:
-        action.type.reason === 'push'
+        reason === 'push'
           ? RPCChatTypes.localGetThreadNonblockReason.push
           : RPCChatTypes.localGetThreadNonblockReason.general,
     },
@@ -742,7 +814,7 @@ const loadMoreMessagesSuccess = (results: ?Array<any>) => {
 
 // If we're previewing a conversation we tell the service so it injects it into the inbox with a flag to tell us its a preview
 const previewConversation = (action: Chat2Gen.SelectConversationPayload) =>
-  action.payload.reason === 'preview'
+  action.payload.reason === 'preview' || action.payload.reason === 'messageLink'
     ? Saga.call(RPCChatTypes.localPreviewConversationByIDLocalRpcPromise, {
         convID: Types.keyToConversationID(action.payload.conversationIDKey),
       })
@@ -756,15 +828,19 @@ const clearInboxFilter = (action: Chat2Gen.SelectConversationPayload) =>
 // Show a desktop notification
 const desktopNotify = (action: Chat2Gen.DesktopNotificationPayload, state: TypedState) => {
   const {conversationIDKey, author, body} = action.payload
-  const metaMap = state.chat2.metaMap
+  const meta = Constants.getMeta(state, conversationIDKey)
 
   if (
     !Constants.isUserActivelyLookingAtThisThread(state, conversationIDKey) &&
-    !metaMap.getIn([conversationIDKey, 'isMuted']) // ignore muted convos
+    !meta.isMuted // ignore muted convos
   ) {
     logger.info('Sending Chat notification')
     return Saga.put((dispatch: Dispatch) => {
-      NotifyPopup(author, {body}, -1, author, () => {
+      let title = ['small', 'big'].includes(meta.teamType) ? meta.teamname : author
+      if (meta.teamType === 'big') {
+        title += `#${meta.channelname}`
+      }
+      NotifyPopup(title, {body}, -1, author, () => {
         dispatch(
           Chat2Gen.createSelectConversation({
             conversationIDKey,
@@ -840,6 +916,35 @@ const getIdentifyBehavior = (state: TypedState, conversationIDKey: Types.Convers
     : RPCTypes.tlfKeysTLFIdentifyBehavior.chatGuiStrict
 }
 
+const messageReplyPrivately = (action: Chat2Gen.MessageReplyPrivatelyPayload, state: TypedState) => {
+  const {sourceConversationIDKey, ordinal} = action.payload
+  const you = state.config.username
+  const message = Constants.getMessageMap(state, sourceConversationIDKey).get(ordinal)
+  if (!message) {
+    logger.warn("Can't find message to reply to", ordinal)
+    return
+  }
+
+  // Do we already have a convo for this author?
+  const newConversationIDKey =
+    you && Constants.findConversationFromParticipants(state, I.Set([message.author, you]))
+
+  return Saga.sequentially([
+    Saga.put(
+      Chat2Gen.createMessageSetQuoting({
+        ordinal,
+        sourceConversationIDKey,
+        targetConversationIDKey: newConversationIDKey || Constants.pendingConversationIDKey,
+      })
+    ),
+    Saga.put(
+      Chat2Gen.createStartConversation({
+        participants: [message.author],
+      })
+    ),
+  ])
+}
+
 const messageEdit = (action: Chat2Gen.MessageEditPayload, state: TypedState) => {
   const {conversationIDKey, text, ordinal} = action.payload
   const message = Constants.getMessageMap(state, conversationIDKey).get(ordinal)
@@ -898,21 +1003,28 @@ const sendToPendingConversation = (action: Chat2Gen.SendToPendingConversationPay
     ? RPCChatTypes.commonConversationMembersType.impteamnative
     : RPCChatTypes.commonConversationMembersType.kbfs
 
-  return Saga.call(RPCChatTypes.localNewConversationLocalRpcPromise, {
-    identifyBehavior: RPCTypes.tlfKeysTLFIdentifyBehavior.chatGui,
-    membersType,
-    tlfName,
-    tlfVisibility: RPCTypes.commonTLFVisibility.private,
-    topicType: RPCChatTypes.commonTopicType.chat,
-  })
+  return Saga.sequentially([
+    // Disable sending more into a pending conversation
+    Saga.put(Chat2Gen.createSetPendingStatus({pendingStatus: 'waiting'})),
+    // Disable searching for more people once you've tried to send
+    Saga.put(Chat2Gen.createSetPendingMode({pendingMode: 'fixedSetOfUsers'})),
+    // Try to make the conversation
+    Saga.call(RPCChatTypes.localNewConversationLocalRpcPromise, {
+      identifyBehavior: RPCTypes.tlfKeysTLFIdentifyBehavior.chatGui,
+      membersType,
+      tlfName,
+      tlfVisibility: RPCTypes.commonTLFVisibility.private,
+      topicType: RPCChatTypes.commonTopicType.chat,
+    }),
+  ])
 }
 
 // Now actually send
 const sendToPendingConversationSuccess = (
-  results: RPCChatTypes.NewConversationLocalRes,
+  results: [any, any, RPCChatTypes.NewConversationLocalRes],
   action: Chat2Gen.SendToPendingConversationPayload
 ) => {
-  const conversationIDKey = Types.conversationIDToKey(results.conv.info.id)
+  const conversationIDKey = Types.conversationIDToKey(results[2].conv.info.id)
   if (!conversationIDKey) {
     logger.warn("Couldn't make a new conversation?")
     return
@@ -944,9 +1056,91 @@ const sendToPendingConversationSuccess = (
     Saga.put(Chat2Gen.createMetasReceived({metas: [dummyMeta]})),
     // Select it
     Saga.put(Chat2Gen.createSelectConversation({conversationIDKey, reason: 'justCreated'})),
+    // Clear the pendingStatus
+    Saga.put(Chat2Gen.createSetPendingStatus({pendingStatus: 'none'})),
     // Post it
     Saga.put(updatedSendingAction),
   ])
+}
+
+const sendToPendingConversationError = (e: Error, action: Chat2Gen.SendToPendingConversationPayload) =>
+  Saga.sequentially([
+    // Enable controls for the user to retry / cancel
+    Saga.put(Chat2Gen.createSetPendingStatus({pendingStatus: 'failed'})),
+    // Set the submitState of the pending messages
+    Saga.put(
+      Chat2Gen.createSetPendingMessageSubmitState({
+        reason: e.message,
+        submitState: 'failed',
+      })
+    ),
+  ])
+
+const cancelPendingConversation = (action: Chat2Gen.CancelPendingConversationPayload) =>
+  Saga.sequentially([
+    // clear the search
+    Saga.put(Chat2Gen.createExitSearch({canceled: true})),
+    // clear out pending conv data
+    Saga.put(Chat2Gen.createClearPendingConversation()),
+    // Reset pending flags
+    Saga.put(Chat2Gen.createSetPendingMode({pendingMode: 'none'})),
+    Saga.put(Chat2Gen.createSetPendingStatus({pendingStatus: 'none'})),
+    // Navigate to the inbox
+    Saga.put(Chat2Gen.createNavigateToInbox()),
+  ])
+
+const retryPendingConversation = (action: Chat2Gen.RetryPendingConversationPayload, state: TypedState) => {
+  const pendingMessages = state.chat2.messageMap.get(Constants.pendingConversationIDKey)
+  if (!(pendingMessages && !pendingMessages.isEmpty())) {
+    logger.warn('retryPendingConversation: found no pending messages; aborting')
+    return
+  }
+  const pendingUsers = state.chat2.pendingConversationUsers
+  if (pendingUsers.isEmpty()) {
+    logger.warn('retryPendingConversation: found no pending conv users; aborting')
+    return
+  }
+
+  if (pendingMessages.size > 1) {
+    logger.warn('retryPendingConversation: found more than one pending message; only resending the first')
+  }
+  // $FlowIssue thinks message can be null
+  const message: Types.Message = pendingMessages.first()
+  const you = state.config.username
+  if (!you) {
+    logger.warn('retryPendingConversation: found no currently logged in username; aborting')
+    return
+  }
+  let retryAction: ?(Chat2Gen.MessageSendPayload | Chat2Gen.AttachmentUploadPayload)
+  if (message.type === 'text') {
+    retryAction = Chat2Gen.createMessageSend({
+      conversationIDKey: message.conversationIDKey,
+      text: message.text,
+    })
+  } else if (message.type === 'attachment') {
+    retryAction = Chat2Gen.createAttachmentUpload({
+      conversationIDKey: message.conversationIDKey,
+      path: message.previewURL,
+      title: message.title,
+    })
+  }
+  if (retryAction) {
+    return Saga.sequentially([
+      Saga.put(
+        Chat2Gen.createSendToPendingConversation({
+          users: pendingUsers.concat([you]).toArray(),
+          sendingAction: retryAction,
+        })
+      ),
+      Saga.put(
+        Chat2Gen.createSetPendingMessageSubmitState({
+          reason: 'Retrying createConversation...',
+          submitState: 'pending',
+        })
+      ),
+    ])
+  }
+  logger.warn(`retryPendingConversation: got message of invalid type ${message.type}`)
 }
 
 const messageRetry = (action: Chat2Gen.MessageRetryPayload, state: TypedState) => {
@@ -1001,6 +1195,7 @@ const messageSend = (action: Chat2Gen.MessageSendPayload, state: TypedState) => 
     ? [
         Saga.put(Chat2Gen.createSelectConversation({conversationIDKey, reason: 'existingSearch'})),
         Saga.put(Chat2Gen.createSetPendingMode({pendingMode: 'none'})),
+        Saga.put(Chat2Gen.createSetPendingStatus({pendingStatus: 'none'})),
       ]
     : []
 
@@ -1038,7 +1233,7 @@ const messageSend = (action: Chat2Gen.MessageSendPayload, state: TypedState) => 
 
 // Start a conversation, or select an existing one
 const startConversation = (action: Chat2Gen.StartConversationPayload, state: TypedState) => {
-  const {participants, tlf} = action.payload
+  const {participants, tlf, fromAReset} = action.payload
   const you = state.config.username || ''
 
   let users: Array<string> = []
@@ -1047,6 +1242,7 @@ const startConversation = (action: Chat2Gen.StartConversationPayload, state: Typ
   // we handled participants or tlfs
   if (participants) {
     users = participants
+    conversationIDKey = Constants.findConversationFromParticipants(state, I.Set(users))
   } else if (tlf) {
     const parts = tlf.split('/')
     if (parts.length >= 4) {
@@ -1059,7 +1255,7 @@ const startConversation = (action: Chat2Gen.StartConversationPayload, state: Typ
             : parseFolderNameToUsers('', names)
                 .map(u => u.username)
                 .filter(u => u !== you)
-        conversationIDKey = Constants.getExistingConversationWithUsers(I.Set(users), you, state.chat2.metaMap)
+        conversationIDKey = Constants.findConversationFromParticipants(state, I.Set(users))
       } else if (type === 'team') {
         // Actually a team, find general channel
         const meta = state.chat2.metaMap.find(
@@ -1089,8 +1285,10 @@ const startConversation = (action: Chat2Gen.StartConversationPayload, state: Typ
   }
 
   return Saga.sequentially([
-    // its a fixed set of users so it's not a search (aka you can't add people to it)
-    Saga.put(Chat2Gen.createSetPendingMode({pendingMode: 'fixedSetOfUsers'})),
+    // it's a fixed set of users so it's not a search (aka you can't add people to it)
+    Saga.put(
+      Chat2Gen.createSetPendingMode({pendingMode: fromAReset ? 'startingFromAReset' : 'fixedSetOfUsers'})
+    ),
     Saga.put(Chat2Gen.createSetPendingConversationUsers({fromSearch: false, users})),
     Saga.put(Chat2Gen.createNavigateToThread()),
   ])
@@ -1100,10 +1298,17 @@ const bootstrapSuccess = () => Saga.put(Chat2Gen.createInboxRefresh({reason: 'bo
 
 // Various things can cause us to lose our selection so this reselects the newest conversation
 const selectTheNewestConversation = (
-  action: Chat2Gen.MetasReceivedPayload | Chat2Gen.LeaveConversationPayload | Chat2Gen.MetaDeletePayload,
+  action:
+    | Chat2Gen.MetasReceivedPayload
+    | Chat2Gen.LeaveConversationPayload
+    | Chat2Gen.MetaDeletePayload
+    | TeamsGen.LeaveTeamPayload,
   state: TypedState
 ) => {
   if (action.type === Chat2Gen.metaDelete) {
+    if (!action.payload.selectSomethingElse) {
+      return
+    }
     // only do this if we blocked the current conversation
     if (Constants.getSelectedConversation(state) !== action.payload.conversationIDKey) {
       return
@@ -1115,15 +1320,29 @@ const selectTheNewestConversation = (
     }
   }
 
-  const meta = state.chat2.metaMap
+  const metas = state.chat2.metaMap
     .filter(meta => meta.teamType !== 'big')
     .sort((a, b) => b.timestamp - a.timestamp)
-    .first()
+  let meta
+  if (action.type === TeamsGen.leaveTeam) {
+    // make sure we don't reselect the team chat if it happens to be first in the list
+    meta = metas.filter(meta => meta.teamname !== action.payload.teamname).first()
+  } else {
+    meta = metas.first()
+  }
   if (meta) {
     return Saga.put(
       Chat2Gen.createSelectConversation({
         conversationIDKey: meta.conversationIDKey,
         reason: 'findNewestConversation',
+      })
+    )
+  } else if (action.type === TeamsGen.leaveTeam) {
+    // the team we left is the only chat we had
+    return Saga.put(
+      Chat2Gen.createSelectConversation({
+        conversationIDKey: Types.stringToConversationIDKey(''),
+        reason: 'clearSelected',
       })
     )
   }
@@ -1139,6 +1358,9 @@ const onExitSearch = (action: Chat2Gen.ExitSearchPayload, state: TypedState) => 
     Saga.put(SearchGen.createSetUserInputItems({searchKey: 'chatSearch', searchResults: []})),
     Saga.put(Chat2Gen.createSetPendingConversationUsers({fromSearch: true, users: []})),
     Saga.put(Chat2Gen.createSetPendingMode({pendingMode: 'none'})),
+    Saga.put(Chat2Gen.createSetPendingStatus({pendingStatus: 'none'})),
+    // We may have some failed pending messages sitting around, clear out that data
+    Saga.put(Chat2Gen.createClearPendingConversation()),
     ...(action.payload.canceled || !conversationIDKey
       ? []
       : [Saga.put(Chat2Gen.createSelectConversation({conversationIDKey, reason: 'startFoundExisting'}))]),
@@ -1190,123 +1412,23 @@ const updatePendingSelected = (
   }
 }
 
-// We keep a set of attachment previews to load
-let attachmentQueue = []
-const queueAttachmentToRequest = (action: Chat2Gen.AttachmentNeedsUpdatingPayload, state: TypedState) => {
-  const {conversationIDKey, ordinal, isPreview} = action.payload
-  attachmentQueue.push({conversationIDKey, isPreview, ordinal})
-  return Saga.put(Chat2Gen.createAttachmentHandleQueue())
-}
-
-// Watch the attachment queue and take one item. Choose the last items first since they're likely still visible
-const requestAttachment = (action: Chat2Gen.AttachmentHandleQueuePayload, state: TypedState) => {
-  if (!attachmentQueue.length) {
-    return
-  }
-
-  const toLoad = attachmentQueue.pop()
-  const toLoadActions = [Saga.put(Chat2Gen.createAttachmentLoad(toLoad))]
-  const loadSomeMoreActions = attachmentQueue.length ? [Saga.put(Chat2Gen.createAttachmentHandleQueue())] : []
-  const delayBeforeLoadingMoreActions =
-    toLoadActions.length && loadSomeMoreActions.length ? [Saga.call(Saga.delay, 100)] : []
-
-  const nextActions = [...toLoadActions, ...delayBeforeLoadingMoreActions, ...loadSomeMoreActions]
-
-  if (nextActions.length) {
-    return Saga.sequentially(nextActions)
-  }
-}
-
-// Load a preview or actual image
-function* attachmentLoad(action: Chat2Gen.AttachmentLoadPayload) {
-  const {conversationIDKey, ordinal, isPreview} = action.payload
-  const state: TypedState = yield Saga.select()
-  const message = Constants.getMessageMap(state, conversationIDKey).get(ordinal)
-
-  if (!message || message.type !== 'attachment') {
-    logger.warn('Bailing on unknown attachmentLoad', conversationIDKey, ordinal)
-    return
-  }
-
-  // done or in progress? bail
-  if (isPreview) {
-    if (message.devicePreviewPath || message.previewTransferState === 'downloading') {
-      logger.info('Bailing on attachmentLoad', conversationIDKey, ordinal, isPreview)
-      return
-    }
-  } else {
-    if (message.deviceFilePath || message.transferState === 'downloading') {
-      logger.info('Bailing on attachmentLoad', conversationIDKey, ordinal, isPreview)
-      return
-    }
-  }
-
-  const parts = message.fileName.split('.')
-  const fileName = tmpFile(
-    `kbchat-${conversationIDKey}-${Types.ordinalToNumber(ordinal)}.${isPreview ? 'preview' : 'download'}.${
-      parts[parts.length - 1]
-    }`
-  )
-
-  // Immediately show the loading
-  yield Saga.put(Chat2Gen.createAttachmentLoading({conversationIDKey, isPreview, ordinal, ratio: 0.01}))
-  let alreadyLoaded = false
-  if (message.attachmentType === 'image') {
-    try {
-      const fileStat = yield Saga.call(stat, fileName)
-      const validSize = isPreview ? fileStat.size > 0 : fileStat.size === message.fileSize
-      // We don't have the preview size so assume if it has data its good, else use the filesize
-      if (validSize) {
-        yield Saga.put(
-          Chat2Gen.createAttachmentLoaded({conversationIDKey, isPreview, ordinal, path: fileName})
-        )
-        alreadyLoaded = true
-      } else {
-        logger.warn('Invalid attachment size', fileStat.size)
-      }
-    } catch (_) {}
-  }
-
-  // If we're loading the preview lets see if we downloaded previously once so show in finder / download state is correct
-  if (isPreview && !message.downloadPath) {
-    try {
-      const downloadPath = downloadFilePathNoSearch(message.fileName)
-      const fileStat = yield Saga.call(stat, downloadPath)
-      // already exists?
-      if (fileStat.size === message.fileSize) {
-        yield Saga.put(Chat2Gen.createAttachmentDownloaded({conversationIDKey, ordinal, path: downloadPath}))
-      }
-    } catch (_) {}
-  }
-
-  // We already loaded this file so lets bail
-  if (alreadyLoaded) {
-    return
-  }
-
-  // If its a non image and a preview lets just count it as loaded
-  if (isPreview && message.attachmentType !== 'image') {
-    yield Saga.put(Chat2Gen.createAttachmentLoaded({conversationIDKey, isPreview, ordinal, path: fileName}))
-    return
-  }
-
+function* downloadAttachment(fileName: string, conversationIDKey: any, message: any, ordinal: any) {
   // Start downloading
   let lastRatioSent = 0
   const downloadFileRpc = new EngineRpc.EngineRpcCall(
     {
       'chat.1.chatUi.chatAttachmentDownloadDone': EngineRpc.passthroughResponseSaga,
-      // Progress on download, not preview
-      'chat.1.chatUi.chatAttachmentDownloadProgress': isPreview
-        ? EngineRpc.passthroughResponseSaga
-        : function*({bytesComplete, bytesTotal}) {
-            const ratio = bytesComplete / bytesTotal
-            // Don't spam ourselves with updates
-            if (ratio - lastRatioSent > 0.05) {
-              lastRatioSent = ratio
-              yield Saga.put(Chat2Gen.createAttachmentLoading({conversationIDKey, isPreview, ordinal, ratio}))
-            }
-            return EngineRpc.rpcResult()
-          },
+      'chat.1.chatUi.chatAttachmentDownloadProgress': function*({bytesComplete, bytesTotal}) {
+        const ratio = bytesComplete / bytesTotal
+        // Don't spam ourselves with updates
+        if (ratio - lastRatioSent > 0.05) {
+          lastRatioSent = ratio
+          yield Saga.put(
+            Chat2Gen.createAttachmentLoading({conversationIDKey, isPreview: false, ordinal, ratio})
+          )
+        }
+        return EngineRpc.rpcResult()
+      },
       'chat.1.chatUi.chatAttachmentDownloadStart': EngineRpc.passthroughResponseSaga,
     },
     RPCChatTypes.localDownloadFileAttachmentLocalRpcChannelMap,
@@ -1316,20 +1438,11 @@ function* attachmentLoad(action: Chat2Gen.AttachmentLoadPayload) {
       filename: fileName,
       identifyBehavior: RPCTypes.tlfKeysTLFIdentifyBehavior.chatGui,
       messageID: message.id,
-      preview: isPreview,
     }
   )
-
-  try {
-    const result = yield Saga.call(downloadFileRpc.run)
-    if (EngineRpc.isFinished(result)) {
-      yield Saga.put(Chat2Gen.createAttachmentLoaded({conversationIDKey, isPreview, ordinal, path: fileName}))
-    } else {
-      yield Saga.put(Chat2Gen.createAttachmentLoadedError({conversationIDKey, isPreview, ordinal}))
-    }
-  } catch (err) {
-    logger.warn('attachment failed to load:', err)
-    yield Saga.put(Chat2Gen.createAttachmentLoadedError({conversationIDKey, isPreview, ordinal}))
+  const result = yield Saga.call(downloadFileRpc.run)
+  if (EngineRpc.isFinished(result)) {
+    yield Saga.put(Chat2Gen.createAttachmentDownloaded({conversationIDKey, ordinal, path: fileName}))
   }
 }
 
@@ -1349,40 +1462,17 @@ function* attachmentDownload(action: Chat2Gen.AttachmentDownloadPayload) {
     return
   }
 
-  // Have we downloaded it to cache yet?
-  if (!message.deviceFilePath) {
-    yield Saga.call(
-      attachmentLoad,
-      Chat2Gen.createAttachmentLoad({
-        conversationIDKey,
-        isPreview: false,
-        ordinal,
-      })
-    )
-    const state: TypedState = yield Saga.select()
-    message = Constants.getMessageMap(state, conversationIDKey).get(ordinal)
-    if (!message || message.type !== 'attachment' || !message.deviceFilePath) {
-      logger.warn("Attachment can't downloaded")
-      throw new Error('Error downloading attachment')
-    }
-  }
-
-  // Copy it over
+  // Download it
   const destPath = yield Saga.call(downloadFilePath, message.fileName)
-  yield Saga.call(copy, message.deviceFilePath, destPath)
-  yield Saga.put(
-    Chat2Gen.createAttachmentDownloaded({
-      conversationIDKey,
-      ordinal,
-      path: destPath,
-    })
-  )
+  yield Saga.call(downloadAttachment, destPath, conversationIDKey, message, ordinal)
 }
 
 // Upload an attachment
 function* attachmentUpload(action: Chat2Gen.AttachmentUploadPayload) {
   const {conversationIDKey, path, title} = action.payload
   const state: TypedState = yield Saga.select()
+
+  const outboxID = Constants.generateOutboxID()
 
   // Sending to pending
   if (!conversationIDKey) {
@@ -1396,12 +1486,29 @@ function* attachmentUpload(action: Chat2Gen.AttachmentUploadPayload) {
       return
     }
 
-    yield Saga.put(
-      Chat2Gen.createSendToPendingConversation({
-        sendingAction: action,
-        users: state.chat2.pendingConversationUsers.concat([you]).toArray(),
-      })
-    )
+    yield Saga.sequentially([
+      Saga.put(
+        Chat2Gen.createMessagesAdd({
+          context: {type: 'sent'},
+          messages: [
+            Constants.makePendingAttachmentMessage(
+              state,
+              conversationIDKey,
+              Constants.pathToAttachmentType(path),
+              title,
+              path, // store path here for retry
+              Types.stringToOutboxID(outboxID.toString('hex') || '')
+            ),
+          ],
+        })
+      ),
+      Saga.put(
+        Chat2Gen.createSendToPendingConversation({
+          sendingAction: action,
+          users: state.chat2.pendingConversationUsers.concat([you]).toArray(),
+        })
+      ),
+    ])
     return
   }
 
@@ -1421,8 +1528,6 @@ function* attachmentUpload(action: Chat2Gen.AttachmentUploadPayload) {
   }
 
   const attachmentType = Constants.pathToAttachmentType(path)
-
-  const outboxID = Constants.generateOutboxID()
   const message = Constants.makePendingAttachmentMessage(
     state,
     conversationIDKey,
@@ -1444,7 +1549,11 @@ function* attachmentUpload(action: Chat2Gen.AttachmentUploadPayload) {
   const postAttachment = new EngineRpc.EngineRpcCall(
     {
       'chat.1.chatUi.chatAttachmentPreviewUploadDone': EngineRpc.passthroughResponseSaga,
-      'chat.1.chatUi.chatAttachmentPreviewUploadStart': EngineRpc.passthroughResponseSaga,
+      'chat.1.chatUi.chatAttachmentPreviewUploadStart': function*(metadata) {
+        const ratio = 0
+        yield Saga.put(Chat2Gen.createAttachmentUploading({conversationIDKey, ordinal, ratio}))
+        return EngineRpc.rpcResult()
+      },
       'chat.1.chatUi.chatAttachmentUploadDone': EngineRpc.passthroughResponseSaga,
       'chat.1.chatUi.chatAttachmentUploadOutboxID': EngineRpc.passthroughResponseSaga,
       'chat.1.chatUi.chatAttachmentUploadProgress': function*({bytesComplete, bytesTotal}) {
@@ -1456,7 +1565,11 @@ function* attachmentUpload(action: Chat2Gen.AttachmentUploadPayload) {
         }
         return EngineRpc.rpcResult()
       },
-      'chat.1.chatUi.chatAttachmentUploadStart': EngineRpc.passthroughResponseSaga,
+      'chat.1.chatUi.chatAttachmentUploadStart': function*(metadata) {
+        const ratio = 0
+        yield Saga.put(Chat2Gen.createAttachmentUploading({conversationIDKey, ordinal, ratio}))
+        return EngineRpc.rpcResult()
+      },
     },
     RPCChatTypes.localPostFileAttachmentLocalRpcChannelMap,
     `localPostFileAttachmentLocal-${conversationIDKey}-${path}`,
@@ -1606,15 +1719,18 @@ const loadCanUserPerform = (action: Chat2Gen.SelectConversationPayload, state: T
   if (!teamname) {
     return
   }
-  const canPerform = state.entities.getIn(['teams', 'teamNameToCanPerform', teamname], null)
-  if (!canPerform) {
+  if (!hasCanPerform(state, teamname)) {
     return Saga.put(TeamsGen.createGetTeamOperations({teamname}))
   }
 }
 
 // Helpers to nav you to the right place
-const navigateToInbox = () =>
-  Saga.put(Route.navigateTo([{props: {}, selected: chatTab}, {props: {}, selected: null}]))
+const navigateToInbox = (action: Chat2Gen.NavigateToInboxPayload | Chat2Gen.LeaveConversationPayload) => {
+  if (action.type === Chat2Gen.leaveConversation && action.payload.dontNavigateToInbox) {
+    return
+  }
+  return Saga.put(Route.navigateTo([{props: {}, selected: chatTab}, {props: {}, selected: null}]))
+}
 const navigateToThread = (_: any, state: TypedState) => {
   if (state.chat2.selectedConversation) {
     return Saga.put(
@@ -1646,22 +1762,11 @@ function* messageAttachmentNativeShare(action: Chat2Gen.MessageAttachmentNativeS
   if (!message || message.type !== 'attachment') {
     throw new Error('Invalid share message')
   }
-  if (!message.deviceFilePath) {
-    yield Saga.call(
-      attachmentLoad,
-      Chat2Gen.createAttachmentLoad({
-        conversationIDKey,
-        isPreview: false,
-        ordinal,
-      })
-    )
-    state = yield Saga.select()
-    message = Constants.getMessageMap(state, conversationIDKey).get(ordinal)
-    if (!message || message.type !== 'attachment' || !message.deviceFilePath) {
-      throw new Error("Couldn't download attachment")
-    }
-  }
-  yield Saga.call(showShareActionSheet, {url: message.deviceFilePath})
+  yield Saga.sequentially([
+    Saga.put(Chat2Gen.createAttachmentDownload({conversationIDKey, ordinal, forShare: true})),
+    Saga.call(downloadAndShowShareActionSheet, message.fileURL, message.fileType),
+    Saga.put(Chat2Gen.createAttachmentDownloaded({conversationIDKey, ordinal, forShare: true})),
+  ])
 }
 
 // Native save to camera roll
@@ -1672,24 +1777,9 @@ function* messageAttachmentNativeSave(action: Chat2Gen.MessageAttachmentNativeSa
   if (!message || message.type !== 'attachment') {
     throw new Error('Invalid share message')
   }
-  if (!message.deviceFilePath) {
-    yield Saga.call(
-      attachmentLoad,
-      Chat2Gen.createAttachmentLoad({
-        conversationIDKey,
-        isPreview: false,
-        ordinal,
-      })
-    )
-    state = yield Saga.select()
-    message = Constants.getMessageMap(state, conversationIDKey).get(ordinal)
-    if (!message || message.type !== 'attachment' || !message.deviceFilePath) {
-      throw new Error("Couldn't download attachment")
-    }
-  }
   try {
     logger.info('Trying to save chat attachment to camera roll')
-    yield Saga.call(saveAttachmentDialog, message.deviceFilePath)
+    yield Saga.call(saveAttachmentDialog, message.fileURL)
   } catch (err) {
     logger.info('Failed to save attachment: ' + err)
     throw new Error('Save attachment failed. Enable photo access in privacy settings.')
@@ -1755,6 +1845,27 @@ const blockConversation = (action: Chat2Gen.BlockConversationPayload) =>
     }),
   ])
 
+const setConvRetentionPolicy = (action: Chat2Gen.SetConvRetentionPolicyPayload) => {
+  const {conversationIDKey, policy} = action.payload
+  const convID = Types.keyToConversationID(conversationIDKey)
+  let servicePolicy: ?RPCChatTypes.RetentionPolicy
+  let ret
+  try {
+    servicePolicy = retentionPolicyToServiceRetentionPolicy(policy)
+  } catch (err) {
+    // should never happen
+    logger.error(`Unable to parse retention policy: ${err.message}`)
+    throw err
+  } finally {
+    if (servicePolicy) {
+      ret = Saga.call(RPCChatTypes.localSetConvRetentionLocalRpcPromise, {
+        convID,
+        policy: servicePolicy,
+      })
+    }
+  }
+  return ret
+}
 function* chat2Saga(): Saga.SagaGenerator<any, any> {
   // Platform specific actions
   if (isMobile) {
@@ -1771,13 +1882,13 @@ function* chat2Saga(): Saga.SagaGenerator<any, any> {
     yield Saga.safeTakeEveryPure(Chat2Gen.desktopNotification, desktopNotify)
     // Auto select the latest convo
     yield Saga.safeTakeEveryPure(
-      [Chat2Gen.metasReceived, Chat2Gen.leaveConversation, Chat2Gen.metaDelete],
+      [Chat2Gen.metasReceived, Chat2Gen.leaveConversation, Chat2Gen.metaDelete, TeamsGen.leaveTeam],
       selectTheNewestConversation
     )
   }
 
   // Refresh the inbox
-  yield Saga.safeTakeEveryPure([Chat2Gen.inboxRefresh, Chat2Gen.leaveConversation], inboxRefresh)
+  yield Saga.safeTakeEveryPure(Chat2Gen.inboxRefresh, inboxRefresh)
   // Load teams
   yield Saga.safeTakeEveryPure(Chat2Gen.metasReceived, requestTeamsUnboxing)
   // We've scrolled some new inbox rows into view, queue them up
@@ -1795,6 +1906,7 @@ function* chat2Saga(): Saga.SagaGenerator<any, any> {
       Chat2Gen.loadOlderMessagesDueToScroll,
       Chat2Gen.setPendingConversationUsers,
       Chat2Gen.markConversationsStale,
+      Chat2Gen.metasReceived,
     ],
     loadMoreMessages,
     loadMoreMessagesSuccess
@@ -1833,14 +1945,12 @@ function* chat2Saga(): Saga.SagaGenerator<any, any> {
   yield Saga.safeTakeEveryPure(
     Chat2Gen.sendToPendingConversation,
     sendToPendingConversation,
-    sendToPendingConversationSuccess
+    sendToPendingConversationSuccess,
+    sendToPendingConversationError
   )
+  yield Saga.safeTakeEveryPure(Chat2Gen.cancelPendingConversation, cancelPendingConversation)
+  yield Saga.safeTakeEveryPure(Chat2Gen.retryPendingConversation, retryPendingConversation)
 
-  // We've scrolled some new attachment rows into view, queue them up
-  yield Saga.safeTakeEveryPure(Chat2Gen.attachmentNeedsUpdating, queueAttachmentToRequest)
-  // We have some items in the queue to process
-  yield Saga.safeTakeEveryPure(Chat2Gen.attachmentHandleQueue, requestAttachment)
-  yield Saga.safeTakeEvery(Chat2Gen.attachmentLoad, attachmentLoad)
   yield Saga.safeTakeEvery(Chat2Gen.attachmentDownload, attachmentDownload)
   yield Saga.safeTakeEvery(Chat2Gen.attachmentUpload, attachmentUpload)
 
@@ -1859,7 +1969,7 @@ function* chat2Saga(): Saga.SagaGenerator<any, any> {
     markThreadAsRead
   )
 
-  yield Saga.safeTakeEveryPure(Chat2Gen.navigateToInbox, navigateToInbox)
+  yield Saga.safeTakeEveryPure([Chat2Gen.navigateToInbox, Chat2Gen.leaveConversation], navigateToInbox)
   yield Saga.safeTakeEveryPure(Chat2Gen.navigateToThread, navigateToThread)
 
   yield Saga.safeTakeEveryPure(Chat2Gen.joinConversation, joinConversation)
@@ -1868,6 +1978,9 @@ function* chat2Saga(): Saga.SagaGenerator<any, any> {
   yield Saga.safeTakeEveryPure(Chat2Gen.muteConversation, muteConversation)
   yield Saga.safeTakeEveryPure(Chat2Gen.updateNotificationSettings, updateNotificationSettings)
   yield Saga.safeTakeEveryPure(Chat2Gen.blockConversation, blockConversation)
+
+  yield Saga.safeTakeEveryPure(Chat2Gen.setConvRetentionPolicy, setConvRetentionPolicy)
+  yield Saga.safeTakeEveryPure(Chat2Gen.messageReplyPrivately, messageReplyPrivately)
 }
 
 export default chat2Saga

@@ -5,7 +5,7 @@ import * as React from 'react'
 import Text from './text'
 import Badge from './badge'
 import Avatar from './avatar'
-import get from 'lodash/get'
+import {get} from 'lodash-es'
 import shallowEqual from 'shallowequal'
 import type {Props, ItemProps, TabBarButtonProps} from './tab-bar'
 import {globalStyles, globalColors, globalMargins, platformStyles, desktopStyles} from '../styles'
@@ -183,7 +183,7 @@ class TabBarButton extends React.Component<TabBarButtonProps> {
 
   _renderIcon(color: string, badgeNumber: number) {
     if (this.props.source.type !== 'icon') return // needed to make flow happy
-    const backgroundColor = this.props.selected ? globalColors.darkBlue4 : globalColors.darkBlue3
+    const backgroundColor = globalColors.darkBlue3
     return (
       <Box
         style={{...stylesTabBarButtonIcon, backgroundColor, ...this.props.style}}

@@ -159,11 +159,12 @@ func Init(homeDir string, logFile string, runModeStr string, accessGroupOverride
 	go func() {
 		kbfsCtx := env.NewContextFromGlobalContext(kbCtx)
 		kbfsParams := libkbfs.DefaultInitParams(kbfsCtx)
-		// Setting this flag will enable KBFS debug logging to always be
-		// true in a mobile setting. Kill this setting if too spammy.
-		// (Setting to false now 2017-08-21 PC)
-		kbfsParams.Debug = false
-		kbfsParams.Mode = libkbfs.InitMinimalString
+		// Setting this flag will enable KBFS debug logging to always
+		// be true in a mobile setting. Change these back to the
+		// commented-out values if we need to make a mobile release
+		// before KBFS-on-mobile is ready.
+		kbfsParams.Debug = true                         // false
+		kbfsParams.Mode = libkbfs.InitConstrainedString // libkbfs.InitMinimalString
 		kbfsConfig, _ = libkbfs.Init(
 			context.Background(), kbfsCtx, kbfsParams, serviceCn{}, func() {},
 			kbCtx.Log)
@@ -196,7 +197,8 @@ func (s serviceCn) NewCrypto(config libkbfs.Config, params libkbfs.InitParams, c
 func LogSend(status string, feedback string, sendLogs bool, uiLogPath, traceDir string) (string, error) {
 	logSendContext.Logs.Desktop = uiLogPath
 	logSendContext.Logs.Trace = traceDir
-	return logSendContext.LogSend(status, feedback, sendLogs, 5*1024*1024)
+	env := kbCtx.Env
+	return logSendContext.LogSend(status, feedback, sendLogs, 5*1024*1024, env.GetUID(), env.GetInstallID())
 }
 
 // WriteB64 sends a base64 encoded msgpack rpc payload
@@ -271,6 +273,38 @@ func ForceGC() {
 // Version returns semantic version string
 func Version() string {
 	return libkb.VersionString()
+}
+
+func SetAppStateForeground() {
+	defer kbCtx.Trace("SetAppStateForeground", func() error { return nil })()
+	kbCtx.AppState.Update(keybase1.AppState_FOREGROUND)
+}
+func SetAppStateBackground() {
+	defer kbCtx.Trace("SetAppStateBackground", func() error { return nil })()
+	kbCtx.AppState.Update(keybase1.AppState_BACKGROUND)
+}
+func SetAppStateInactive() {
+	defer kbCtx.Trace("SetAppStateInactive", func() error { return nil })()
+	kbCtx.AppState.Update(keybase1.AppState_INACTIVE)
+}
+func SetAppStateBackgroundActive() {
+	defer kbCtx.Trace("SetAppStateBackgroundActive", func() error { return nil })()
+	kbCtx.AppState.Update(keybase1.AppState_BACKGROUNDACTIVE)
+}
+
+// AppWillExit is called reliably on iOS when the app is about to terminate
+// not as reliably on android
+func AppWillExit() {
+	defer kbCtx.Trace("AppWillExit", func() error { return nil })()
+	kbCtx.AppState.Update(keybase1.AppState_BACKGROUNDFINAL)
+}
+
+// AppDidEnterBackground notifies the service that the app is in the background
+// [iOS] returning true will request about ~3mins from iOS to continue execution
+func AppDidEnterBackground() bool {
+	defer kbCtx.Trace("AppDidEnterBackground", func() error { return nil })()
+	SetAppStateBackground()
+	return false
 }
 
 func startTrace(logFile string) {

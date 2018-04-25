@@ -7,7 +7,7 @@ import * as RPCTypes from '../types/rpc-gen'
 import * as RPCChatTypes from '../types/rpc-chat-gen'
 import * as Types from '../types/chat2'
 import HiddenString from '../../util/hidden-string'
-import clamp from 'lodash/clamp'
+import {clamp} from 'lodash-es'
 import {isMobile} from '../platform'
 import type {TypedState} from '../reducer'
 
@@ -47,8 +47,9 @@ export const makeMessageText: I.RecordFactory<MessageTypes._MessageText> = I.Rec
 export const makeMessageAttachment: I.RecordFactory<MessageTypes._MessageAttachment> = I.Record({
   ...makeMessageCommon,
   attachmentType: 'file',
-  deviceFilePath: '',
-  devicePreviewPath: '',
+  fileURL: '',
+  previewURL: '',
+  fileType: '',
   downloadPath: null,
   fileName: '',
   fileSize: 0,
@@ -114,6 +115,18 @@ const makeMessageSystemGitPush: I.RecordFactory<MessageTypes._MessageSystemGitPu
   repoID: '',
   team: '',
   type: 'systemGitPush',
+})
+
+const makeMessageSetDescription: I.RecordFactory<MessageTypes._MessageSetDescription> = I.Record({
+  ...makeMessageMinimum,
+  newDescription: new HiddenString(''),
+  type: 'setDescription',
+})
+
+const makeMessageSetChannelname: I.RecordFactory<MessageTypes._MessageSetChannelname> = I.Record({
+  ...makeMessageMinimum,
+  newChannelname: '',
+  type: 'setChannelname',
 })
 
 const channelMentionToMentionsChannel = (channelMention: RPCChatTypes.ChannelMention) => {
@@ -325,6 +338,14 @@ const validUIMessagetoMessage = (
           attachmentType = 'image'
         }
       }
+      let previewURL = ''
+      let fileURL = ''
+      let fileType = ''
+      if (m.assetUrlInfo) {
+        previewURL = m.assetUrlInfo.previewUrl
+        fileURL = m.assetUrlInfo.fullUrl
+        fileType = m.assetUrlInfo.mimeType
+      }
 
       return makeMessageAttachment({
         ...common,
@@ -334,6 +355,9 @@ const validUIMessagetoMessage = (
         previewHeight,
         previewWidth,
         title,
+        previewURL,
+        fileURL,
+        fileType,
       })
     }
     case RPCChatTypes.commonMessageType.join:
@@ -342,17 +366,24 @@ const validUIMessagetoMessage = (
       return makeMessageSystemLeft(minimum)
     case RPCChatTypes.commonMessageType.system:
       return m.messageBody.system ? uiMessageToSystemMessage(minimum, m.messageBody.system) : null
+    case RPCChatTypes.commonMessageType.headline:
+      return m.messageBody.headline
+        ? makeMessageSetDescription({
+            ...minimum,
+            newDescription: new HiddenString(m.messageBody.headline.headline),
+          })
+        : null
+    case RPCChatTypes.commonMessageType.metadata:
+      return m.messageBody.metadata
+        ? makeMessageSetChannelname({...minimum, newChannelname: m.messageBody.metadata.conversationTitle})
+        : null
     case RPCChatTypes.commonMessageType.none:
       return null
     case RPCChatTypes.commonMessageType.edit:
       return null
     case RPCChatTypes.commonMessageType.delete:
       return null
-    case RPCChatTypes.commonMessageType.metadata:
-      return null
     case RPCChatTypes.commonMessageType.tlfname:
-      return null
-    case RPCChatTypes.commonMessageType.headline:
       return null
     case RPCChatTypes.commonMessageType.deletehistory:
       return null
@@ -402,6 +433,7 @@ const outboxUIMessagetoMessage = (
     errorReason,
     ordinal: Types.numberToOrdinal(o.ordinal),
     outboxID: Types.stringToOutboxID(o.outboxID),
+    submitState: 'pending',
     text: new HiddenString(o.body),
     timestamp: o.ctime,
   })
@@ -486,7 +518,7 @@ export const makePendingAttachmentMessage = (
   conversationIDKey: Types.ConversationIDKey,
   attachmentType: Types.AttachmentType,
   title: string,
-  devicePreviewPath: string,
+  previewURL: string,
   outboxID: Types.OutboxID
 ) => {
   const lastOrindal =
@@ -498,7 +530,7 @@ export const makePendingAttachmentMessage = (
     author: state.config.username || '',
     conversationIDKey,
     deviceName: '',
-    devicePreviewPath,
+    previewURL,
     deviceType: isMobile ? 'mobile' : 'desktop',
     id: Types.numberToMessageID(0),
     ordinal,
@@ -509,7 +541,7 @@ export const makePendingAttachmentMessage = (
   })
 }
 
-// We only pass message ids to the service so lets just truncate it so a messageid-like value instead of searching back for it.
+// We only pass message ids to the service so let's just truncate it so a messageid-like value instead of searching back for it.
 // this value is a hint to the service and how the ordinals work this is always a valid messageid
 export const getClientPrev = (state: TypedState, conversationIDKey: Types.ConversationIDKey) => {
   const lastOrdinal =
@@ -532,9 +564,12 @@ export const upgradeMessage = (old: Types.Message, m: Types.Message) => {
     // $ForceType
     return m.withMutations((ret: Types.MessageAttachment) => {
       ret.set('ordinal', old.ordinal)
-      ret.set('deviceFilePath', old.deviceFilePath)
-      ret.set('devicePreviewPath', old.devicePreviewPath)
       ret.set('downloadPath', old.downloadPath)
+      if (old.previewURL && !m.previewURL) {
+        ret.set('previewURL', old.previewURL)
+      }
+      ret.set('transferState', old.transferState)
+      ret.set('transferProgress', old.transferProgress)
     })
   }
   return m

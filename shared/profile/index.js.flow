@@ -16,6 +16,7 @@ export type Props = {
   currentlyFollowing: boolean,
   currentFriendshipsTab: FriendshipsTab,
   refresh: () => void,
+  serverActive: boolean,
   onAvatarLoaded?: () => void,
   onBack: ?() => void,
   onChat: () => void,
@@ -23,6 +24,7 @@ export type Props = {
   onUnfollow: () => void,
   onAcceptProofs: () => void,
   onChangeFriendshipsTab: (currentFriendshipsTab: FriendshipsTab) => void,
+  onClickShowcaseOffer: () => void,
   onClickShowcased: (target: ?HTMLElement, team: UserTeamShowcase) => void,
   onMissingProofClick: (missingProof: MissingProof) => void,
   onFolderClick: (folder: Folder) => void,
@@ -40,11 +42,11 @@ export type Props = {
   following: Array<FriendshipUserInfo>,
   reason: ?string,
   error: ?string,
-  showComingSoon: boolean,
   onClickAvatar: () => void,
   onClickFollowers: () => void,
   onClickFollowing: () => void,
   waiting: boolean,
+  youAreInTeams: boolean,
 }
 
 export default class Render extends Component<Props> {}

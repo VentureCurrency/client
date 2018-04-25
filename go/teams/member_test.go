@@ -219,7 +219,7 @@ func TestMemberAddHasBoxes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, boxes, _, _, err := tm.changeMembershipSection(context.TODO(), req)
+	_, boxes, _, _, _, err := tm.changeMembershipSection(context.TODO(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestMemberChangeRoleNoBoxes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, boxes, _, _, err := tm.changeMembershipSection(context.TODO(), req)
+	_, boxes, _, _, _, err := tm.changeMembershipSection(context.TODO(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1023,7 +1023,12 @@ func TestMemberAddRace(t *testing.T) {
 	rotate := func(userIndexOperator int) <-chan error {
 		errCh := make(chan error)
 		go func() {
-			err := HandleRotateRequest(context.TODO(), tcs[userIndexOperator].G, rootID, keybase1.PerTeamKeyGeneration(100))
+			params := keybase1.TeamCLKRMsg{
+				TeamID:              rootID,
+				Generation:          keybase1.PerTeamKeyGeneration(100),
+				ResetUsersUntrusted: nil,
+			}
+			err := HandleRotateRequest(context.TODO(), tcs[userIndexOperator].G, params)
 			errCh <- err
 		}()
 		return errCh

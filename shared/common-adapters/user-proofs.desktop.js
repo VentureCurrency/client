@@ -118,7 +118,7 @@ class ProofRow extends React.PureComponent<ProofRowProps, ProofRowState> {
             </Text>
             {proof.meta &&
               proof.meta !== metaNone && (
-                <Meta title={proof.meta} style={{backgroundColor: shared.metaColor(proof), marginTop: 1}} />
+                <Meta title={proof.meta} backgroundColor={shared.metaColor(proof)} style={{marginTop: 1}} />
               )}
           </Box>
         </Box>
@@ -161,7 +161,7 @@ function LoadingProofRow({textBlockWidth}: {textBlockWidth: number}) {
   )
 }
 
-// CSSTransition injects foreign props so lets not just accept all props
+// CSSTransition injects foreign props so let's not just accept all props
 const IgnorePropsBox = ({children, onlyProps}: {children?: any, onlyProps?: any}) => (
   <Box {...onlyProps}>{children}</Box>
 )

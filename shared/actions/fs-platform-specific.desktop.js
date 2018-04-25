@@ -133,23 +133,11 @@ function waitForMount(attempt: number): Promise<*> {
   })
 }
 
-function* waitForMountAndOpenSaga(): Saga.SagaGenerator<any, any> {
-  yield Saga.put(FsGen.createSetFlags({kbfsOpening: true}))
-  try {
-    yield Saga.call(waitForMount, 0)
-    // TODO: should handle current mount directory
-    yield Saga.put(FsGen.createOpenInFileUI({payload: {path: Config.defaultKBFSPath}}))
-  } finally {
-    yield Saga.put(FsGen.createSetFlags({kbfsOpening: false}))
-  }
-}
-
 export const installKBFS = () => Saga.call(RPCTypes.installInstallKBFSRpcPromise)
 export const installKBFSSuccess = (result: RPCTypes.InstallResult) =>
   Saga.sequentially([
-    Saga.put(FsGen.createInstallKBFSResult({result})),
-    Saga.put(FsGen.createSetFlags({kbfsOpening: true, kbfsInstalling: false})),
-    Saga.call(waitForMountAndOpenSaga),
+    Saga.call(waitForMount, 0),
+    Saga.put(FsGen.createSetFlags({kbfsInstalling: false, showBanner: true})),
   ])
 
 export function fuseStatusResultSaga({payload: {prevStatus, status}}: FsGen.FuseStatusResultPayload) {
@@ -216,6 +204,26 @@ export function uninstallKBFSSuccess(result: RPCTypes.UninstallResult) {
   const app = Electron.remote.app
   app.relaunch()
   app.exit(0)
+}
+
+export function openSecurityPreferences() {
+  return Saga.call(
+    () =>
+      new Promise((resolve, reject) => {
+        Electron.shell.openExternal(
+          'x-apple.systempreferences:com.apple.preference.security?General',
+          {},
+          err => {
+            if (err) {
+              reject(err)
+              return
+            }
+            logger.info('Opened Security Preferences')
+            resolve()
+          }
+        )
+      })
+  )
 }
 
 // Invoking the cached installer package has to happen from the topmost process

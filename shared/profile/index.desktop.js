@@ -3,7 +3,7 @@ import * as shared from './index.shared'
 import * as Constants from '../constants/tracker'
 import Friendships from './friendships'
 import React, {PureComponent} from 'react'
-import orderBy from 'lodash/orderBy'
+import {orderBy} from 'lodash-es'
 import moment from 'moment'
 import {
   Avatar,
@@ -14,18 +14,19 @@ import {
   PopupMenu,
   Text,
   UserBio,
-  UserActions,
   UserProofs,
   Usernames,
   BackButton,
 } from '../common-adapters'
+import UserActions from './user-actions'
 import {PopupHeaderText} from '../common-adapters/popup-menu'
 import {findDOMNode} from 'react-dom'
 import {globalStyles, globalColors, globalMargins, desktopStyles} from '../styles'
 import {stateColors} from '../util/tracker'
 
+import type {UserTeamShowcase} from '../constants/types/rpc-gen'
 import type {Proof} from '../constants/types/tracker'
-import type {Props} from './index'
+import type {Props} from '.'
 
 export const AVATAR_SIZE = 112
 const HEADER_TOP_SPACE = 48
@@ -42,6 +43,52 @@ type State = {
     right?: number,
   },
 }
+
+const EditControl = ({isYou, onClickShowcaseOffer}: {isYou: boolean, onClickShowcaseOffer: () => void}) => (
+  <Box style={globalStyles.flexBoxRow}>
+    <Text type="BodySmallSemibold">Teams</Text>
+    {!!isYou && (
+      <Icon style={{marginLeft: globalMargins.xtiny}} type="iconfont-edit" onClick={onClickShowcaseOffer} />
+    )}
+  </Box>
+)
+
+const ShowcaseTeamsOffer = ({onClickShowcaseOffer}: {onClickShowcaseOffer: () => void}) => (
+  <Box onClick={onClickShowcaseOffer} style={styleShowcasedTeamContainer}>
+    <Box style={styleShowcasedTeamAvatar}>
+      <Icon type="icon-team-placeholder-avatar-24" size={24} style={{borderRadius: 5}} />
+    </Box>
+    <Box style={styleShowcasedTeamName}>
+      <Text style={{color: globalColors.black_20}} type="BodyPrimaryLink">
+        Publish the teams you're in
+      </Text>
+    </Box>
+  </Box>
+)
+
+const ShowcasedTeamRow = ({
+  onClickShowcased,
+  team,
+}: {
+  onClickShowcased: (event: HTMLElement, team: UserTeamShowcase) => void,
+  team: UserTeamShowcase,
+}) => (
+  <Box
+    key={team.fqName}
+    onClick={event => onClickShowcased(event.target, team)}
+    style={styleShowcasedTeamContainer}
+  >
+    <Box style={styleShowcasedTeamAvatar}>
+      <Avatar teamname={team.fqName} size={24} />
+    </Box>
+    <Box style={styleShowcasedTeamName}>
+      <Text style={{color: globalColors.black_75}} type="BodySemiboldLink">
+        {team.fqName}
+      </Text>
+      {team.open && <Meta style={styleMeta} backgroundColor={globalColors.green} title="open" />}
+    </Box>
+  </Box>
+)
 
 class ProfileRender extends PureComponent<Props, State> {
   state: State
@@ -161,26 +208,29 @@ class ProfileRender extends PureComponent<Props, State> {
     if (!this._proofList) {
       return
     }
-    // $FlowIssue
-    const target = findDOMNode(this._proofList.getRow(idx))
-    // $FlowIssue
+    // $ForceType
+    const target: ?Element = findDOMNode(this._proofList.getRow(idx))
+    if (!target) {
+      return
+    }
     const targetBox = target.getBoundingClientRect()
 
     if (!this._scrollContainer) {
       return
     }
 
-    const base = findDOMNode(this._scrollContainer)
-    // $FlowIssue
+    // $ForceType
+    const base: ?Element = findDOMNode(this._scrollContainer)
+    if (!base) {
+      return
+    }
     const baseBox = base.getBoundingClientRect()
 
     this.setState({
       proofMenuIndex: idx,
       popupMenuPosition: {
         position: 'absolute',
-        // $FlowIssue
         top: targetBox.bottom - baseBox.top + base.scrollTop,
-        // $FlowIssue
         right: base.clientWidth - (targetBox.right - baseBox.left),
       },
     })
@@ -197,10 +247,10 @@ class ProfileRender extends PureComponent<Props, State> {
     this.props && this.props.refresh()
   }
 
-  componentWillReceiveProps(nextProps: Props) {
-    const oldUsername = this.props && this.props.username
-    if (nextProps && nextProps.username !== oldUsername) {
-      nextProps.refresh()
+  componentDidUpdate(prevProps: Props) {
+    const oldUsername = prevProps && prevProps.username
+    if (this.props && this.props.username !== oldUsername) {
+      this.props.refresh()
     }
   }
 
@@ -271,6 +321,12 @@ class ProfileRender extends PureComponent<Props, State> {
         ? this._proofMenuContent(this.props.proofs[this.state.proofMenuIndex])
         : null
 
+    const showEdit =
+      (!this.props.isYou && this.props.userInfo && this.props.userInfo.showcasedTeams.length > 0) ||
+      (this.props.isYou && this.props.youAreInTeams)
+
+    const showShowcaseTeamsOffer = this.props.isYou && this.props.youAreInTeams
+
     return (
       <Box style={styleOuterContainer}>
         <Box style={{...styleScrollHeaderBg, backgroundColor: trackerStateColors.header.background}} />
@@ -316,7 +372,6 @@ class ProfileRender extends PureComponent<Props, State> {
                 userInfo={this.props.userInfo}
                 currentlyFollowing={this.props.currentlyFollowing}
                 trackerState={this.props.trackerState}
-                onClickAvatar={this.props.onClickAvatar}
                 onClickFollowers={this.props.onClickFollowers}
                 onClickFollowing={this.props.onClickFollowing}
               />
@@ -343,31 +398,27 @@ class ProfileRender extends PureComponent<Props, State> {
                 )}
               </Box>
               <Box style={styleProofs}>
-                {!loading &&
-                  this.props.userInfo.showcasedTeams.length > 0 && (
-                    <Box style={{...globalStyles.flexBoxColumn, paddingBottom: globalMargins.small}}>
-                      <Box style={globalStyles.flexBoxRow}>
-                        <Text type="BodySmallSemibold">Teams:</Text>
-                      </Box>
-                      {this.props.userInfo.showcasedTeams.map(team => (
-                        <Box
-                          key={team.fqName}
-                          onClick={event => this.props.onClickShowcased(event.target, team)}
-                          style={styleShowcasedTeamContainer}
-                        >
-                          <Box style={styleShowcasedTeamAvatar}>
-                            <Avatar teamname={team.fqName} size={24} />
-                          </Box>
-                          <Box style={styleShowcasedTeamName}>
-                            <Text style={{color: globalColors.black_75}} type="BodySemiboldLink">
-                              {team.fqName}
-                            </Text>
-                            {team.open && <Meta style={styleMeta} title="OPEN" />}
-                          </Box>
-                        </Box>
-                      ))}
-                    </Box>
-                  )}
+                {!loading && (
+                  <Box style={{...globalStyles.flexBoxColumn, paddingBottom: globalMargins.small}}>
+                    {showEdit && (
+                      <EditControl
+                        isYou={this.props.isYou}
+                        onClickShowcaseOffer={this.props.onClickShowcaseOffer}
+                      />
+                    )}
+                    {this.props.userInfo.showcasedTeams.length > 0
+                      ? this.props.userInfo.showcasedTeams.map(team => (
+                          <ShowcasedTeamRow
+                            key={team.fqName}
+                            onClickShowcased={this.props.onClickShowcased}
+                            team={team}
+                          />
+                        ))
+                      : showShowcaseTeamsOffer && (
+                          <ShowcaseTeamsOffer onClickShowcaseOffer={this.props.onClickShowcaseOffer} />
+                        )}
+                  </Box>
+                )}
                 {(loading || this.props.proofs.length > 0) && (
                   <UserProofs
                     type={'proofs'}
@@ -413,7 +464,10 @@ class ProfileRender extends PureComponent<Props, State> {
             )}
           {proofMenuContent && (
             <PopupMenu
-              style={{...styleProofMenu, ...this.state.popupMenuPosition}}
+              style={
+                // $FlowIssue
+                {...styleProofMenu, ...this.state.popupMenuPosition}
+              }
               {...proofMenuContent}
               onHidden={() => this.handleHideMenu()}
             />
@@ -441,7 +495,7 @@ const styleHeader = {
   height: HEADER_SIZE,
 }
 
-// Two sticky header elements to accomodate overlay and space-consuming scrollbars:
+// Two sticky header elements to accommodate overlay and space-consuming scrollbars:
 
 // styleScrollHeaderBg sits beneath the content and colors the background under the overlay scrollbar.
 const styleScrollHeaderBg = {
@@ -509,8 +563,6 @@ const styleFolderIcon = {
 
 const styleMeta = {
   alignSelf: 'center',
-  backgroundColor: globalColors.green,
-  borderRadius: 1,
   marginLeft: globalMargins.xtiny,
   marginTop: 2,
 }

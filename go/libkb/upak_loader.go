@@ -357,7 +357,7 @@ func (u *CachedUPAKLoader) loadWithInfo(arg LoadUserArg, info *CachedUserLoadInf
 
 			upak.Uvv.CachedAt = keybase1.ToTime(g.Clock().Now())
 			// This is only necessary to update the levelDB representation,
-			// since the previous line updates the in-memory cache satisfactorially.
+			// since the previous line updates the in-memory cache satisfactorily.
 			if err := u.putUPAKToCache(ctx, upak); err != nil {
 				u.G().Log.CDebugf(ctx, "continuing past error in putUPAKToCache: %s", err)
 			}
@@ -505,7 +505,7 @@ func (u *CachedUPAKLoader) LoadKeyV2(ctx context.Context, uid keybase1.UID, kid 
 
 	argBase := NewLoadUserArg(u.G()).WithUID(uid).WithPublicKeyOptional().WithNetContext(ctx)
 
-	// Make the retry mechanism increasingly aggresive. See CORE-8851.
+	// Make the retry mechanism increasingly aggressive. See CORE-8851.
 	// It should be that a ForcePoll is good enough, but in some rare cases,
 	// people have cached values for previous pre-reset user incarnations that
 	// were incorrect. So clobber over that if it comes to it.
@@ -674,15 +674,19 @@ func (u *CachedUPAKLoader) lookupUsernameAndDeviceWithInfo(ctx context.Context, 
 }
 
 func (u *CachedUPAKLoader) loadUserWithKIDAndInfo(ctx context.Context, uid keybase1.UID, kid keybase1.KID, info *CachedUserLoadInfo) (ret *keybase1.UserPlusKeysV2AllIncarnations, err error) {
-	arg := NewLoadUserByUIDArg(ctx, u.G(), uid)
+	argBase := NewLoadUserArg(u.G()).WithUID(uid).WithPublicKeyOptional().WithNetContext(ctx)
 
-	// First iteration through, say it's OK to load a stale user. IF the KID is
-	// missing, then the second time through, we request a fresh object.
-	staleOK := []bool{true, false}
-	for _, b := range staleOK {
-		arg = arg.WithStaleOK(b)
+	// See comment in LoadKeyV2
+	attempts := []LoadUserArg{
+		argBase,
+		argBase.WithForcePoll(true),
+		argBase.WithForceReload(),
+	}
+	for _, arg := range attempts {
+		u.G().VDL.CLogf(ctx, VLog0, "| loadWithUserKIDAndInfo: loading with arg: %s", arg.String())
 		ret, _, err = u.loadWithInfo(arg, info, nil, false)
 		if err == nil && ret != nil && (kid.IsNil() || ret.HasKID(kid)) {
+			u.G().VDL.CLogf(ctx, VLog0, "| loadWithUserKIDAndInfo: UID/KID %s/%s found", uid, kid)
 			return ret, nil
 		}
 	}

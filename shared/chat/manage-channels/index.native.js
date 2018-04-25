@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   ClickableBox,
+  ProgressIndicator,
   ScrollView,
   Checkbox,
   Icon,
@@ -91,12 +92,12 @@ const ManageChannels = (props: Props) => (
       )}
       {props.channels.map(c => (
         <Row
-          key={c.name}
+          key={c.convID}
           canEditChannels={props.canEditChannels}
           description={c.description}
           name={c.name}
-          selected={props.nextChannelState[c.name]}
-          onToggle={() => props.onToggle(c.name)}
+          selected={props.nextChannelState[c.convID]}
+          onToggle={() => props.onToggle(c.convID)}
           showEdit={!props.unsavedSubscriptions}
           onEdit={() => props.onEdit(c.convID)}
           onClickChannel={() => props.onClickChannel(c.convID)}
@@ -114,7 +115,7 @@ const ManageChannels = (props: Props) => (
         <Button
           type="Primary"
           label={props.unsavedSubscriptions ? 'Save' : 'Saved'}
-          waiting={props.waitingForSave}
+          waiting={props.waitingForGet}
           disabled={!props.unsavedSubscriptions}
           onClick={props.onSaveSubscriptions}
           style={{marginLeft: globalMargins.tiny}}
@@ -124,23 +125,33 @@ const ManageChannels = (props: Props) => (
   </Box>
 )
 
-const Header = (props: Props) => (
-  <Box style={_headerStyle}>
-    <Box style={{...globalStyles.flexBoxRow, alignItems: 'center', height: 15}}>
-      <Avatar isTeam={true} teamname={props.teamname} size={12} />
-      <Text
-        type="BodySmallSemibold"
-        style={platformStyles({isMobile: {fontSize: 11, lineHeight: 15, marginLeft: globalMargins.xtiny}})}
-        lineClamp={1}
-      >
-        {props.teamname}
+const Header = (props: Props) => {
+  let channelDisplay
+  if (props.channels.length === 0 || props.waitingForGet) {
+    channelDisplay = <ProgressIndicator style={{width: 48}} />
+  } else {
+    channelDisplay = (
+      <Text type="BodyBig">
+        {props.channels.length} {props.channels.length !== 1 ? 'chat channels' : 'chat channel'}
       </Text>
+    )
+  }
+  return (
+    <Box style={_headerStyle}>
+      <Box style={{...globalStyles.flexBoxRow, alignItems: 'center', height: 15}}>
+        <Avatar isTeam={true} teamname={props.teamname} size={12} />
+        <Text
+          type="BodySmallSemibold"
+          style={platformStyles({isMobile: {fontSize: 11, lineHeight: 15, marginLeft: globalMargins.xtiny}})}
+          lineClamp={1}
+        >
+          {props.teamname}
+        </Text>
+      </Box>
+      {channelDisplay}
     </Box>
-    <Text type="BodyBig">
-      {props.channels.length} {props.channels.length !== 1 ? 'chat channels' : 'chat channel'}
-    </Text>
-  </Box>
-)
+  )
+}
 
 const _headerStyle = {
   ...globalStyles.fillAbsolute,

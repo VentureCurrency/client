@@ -1,6 +1,5 @@
 // @flow
-import last from 'lodash/last'
-import trim from 'lodash/trim'
+import {trim, last} from 'lodash-es'
 import React, {Component} from 'react'
 import {AutosizeInput, Box, Text, Icon} from '../../common-adapters'
 import {globalColors, globalMargins, globalStyles, platformStyles, collapseStyles} from '../../styles'
@@ -75,11 +74,13 @@ class UserInput extends Component<Props, State> {
   }
 
   _onInputKeyDown = ev => {
+    // $ForceType
+    const target: HTMLInputElement = ev.target
     if (
       this.props.userItems.length &&
       ev.key === 'Backspace' &&
-      ev.target.selectionStart === 0 &&
-      ev.target.selectionEnd === 0
+      target.selectionStart === 0 &&
+      target.selectionEnd === 0
     ) {
       this.props.onRemoveUser(last(this.props.userItems).id)
     } else if (ev.key === 'ArrowUp') {

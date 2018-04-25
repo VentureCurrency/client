@@ -8,12 +8,11 @@ import * as SettingsGen from '../actions/settings-gen'
 import * as RPCTypes from '../constants/types/rpc-gen'
 import * as Saga from '../util/saga'
 import * as WaitingGen from '../actions/waiting-gen'
-import mapValues from 'lodash/mapValues'
-import trim from 'lodash/trim'
+import {mapValues, trim} from 'lodash-es'
 import {delay} from 'redux-saga'
 import {navigateAppend, navigateUp} from '../actions/route-tree'
 import {type TypedState} from '../constants/reducer'
-import {traceDir} from '../constants/platform'
+import {pprofDir} from '../constants/platform'
 
 function* _onUpdatePGPSettings(): Saga.SagaGenerator<any, any> {
   try {
@@ -190,7 +189,7 @@ function* _refreshInvitesSaga(): Saga.SagaGenerator<any, any> {
     }
   })
   yield Saga.put(
-    // $FlowIssues the typing of this is very incorrect. acceptedInvites shape doens't look anything like what we're pushing
+    // $FlowIssues the typing of this is very incorrect. acceptedInvites shape doesn't look anything like what we're pushing
     SettingsGen.createInvitesRefreshed({
       invites: {
         acceptedInvites,
@@ -358,12 +357,25 @@ const _traceSaga = (action: SettingsGen.TracePayload) => {
   const durationSeconds = action.payload.durationSeconds
   return Saga.sequentially([
     Saga.call(RPCTypes.pprofLogTraceRpcPromise, {
-      logDirForMobile: traceDir(),
+      logDirForMobile: pprofDir(),
       traceDurationSeconds: durationSeconds,
     }),
     Saga.put(WaitingGen.createIncrementWaiting({key: Constants.traceInProgressKey})),
     Saga.delay(durationSeconds * 1000),
     Saga.put(WaitingGen.createDecrementWaiting({key: Constants.traceInProgressKey})),
+  ])
+}
+
+const _processorProfileSaga = (action: SettingsGen.ProcessorProfilePayload) => {
+  const durationSeconds = action.payload.durationSeconds
+  return Saga.sequentially([
+    Saga.call(RPCTypes.pprofLogProcessorProfileRpcPromise, {
+      logDirForMobile: pprofDir(),
+      profileDurationSeconds: durationSeconds,
+    }),
+    Saga.put(WaitingGen.createIncrementWaiting({key: Constants.processorProfileInProgressKey})),
+    Saga.delay(durationSeconds * 1000),
+    Saga.put(WaitingGen.createDecrementWaiting({key: Constants.processorProfileInProgressKey})),
   ])
 }
 
@@ -387,6 +399,7 @@ function* settingsSaga(): Saga.SagaGenerator<any, any> {
   yield Saga.safeTakeEvery(SettingsGen.onSubmitNewPassphrase, _onSubmitNewPassphrase)
   yield Saga.safeTakeEvery(SettingsGen.onUpdatePGPSettings, _onUpdatePGPSettings)
   yield Saga.safeTakeLatestPure(SettingsGen.trace, _traceSaga)
+  yield Saga.safeTakeLatestPure(SettingsGen.processorProfile, _processorProfileSaga)
   yield Saga.safeTakeEveryPure(
     SettingsGen.loadRememberPassphrase,
     _getRememberPassphrase,

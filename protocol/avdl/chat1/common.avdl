@@ -209,6 +209,7 @@
     MessageID basis;
   }
 
+  @mpackkey("em") @jsonkey("em")
   record ConversationMetadata  {
     ConversationIDTriple idTriple;
     ConversationID conversationID;
@@ -290,6 +291,9 @@
     MessageID messageID;
     MessageID supersededBy;
     gregor1.Time ctime;
+    // server's view of now(), used to calculate ephemeral lifetimes
+    @mpackkey("n") @jsonkey("n")
+    gregor1.Time now;
   }
 
   record MessagePreviousPointer {
@@ -300,6 +304,24 @@
   record OutboxInfo {
     MessageID prev; // This is the message ID the sending client device saw as the previous
     gregor1.Time composeTime;
+  }
+
+  @mpackkey("em") @jsonkey("em")
+  record MsgEphemeralMetadata {
+    @mpackkey("l") @jsonkey("l")
+    gregor1.DurationSec lifetime; // used to computed etime
+    @mpackkey("g") @jsonkey("g")
+    keybase1.EkGeneration generation;
+  }
+
+  @mpackkey("pi") @jsonkey("pi")
+  record EphemeralPurgeInfo {
+    @mpackkey("a") @jsonkey("a")
+    boolean isActive;
+    @mpackkey("n") @jsonkey("n")
+    gregor1.Time nextPurgeTime;
+    @mpackkey("e") @jsonkey("e")
+    MessageID minUnexplodedID;
   }
 
   // The Boxer's compareHeaders* functions checks each of these fields.
@@ -333,6 +355,9 @@
 
     union { null, OutboxID } outboxID;
     union { null, OutboxInfo } outboxInfo;
+
+    @mpackkey("em") @jsonkey("em")
+    union { null, MsgEphemeralMetadata } ephemeralMetadata;
   }
 
   record MessageClientHeaderVerified {
@@ -356,6 +381,14 @@
     union { null, MerkleRoot } merkleRoot;
     union { null, OutboxID } outboxID;
     union { null, OutboxInfo } outboxInfo;
+
+    @mpackkey("em") @jsonkey("em")
+    union { null, MsgEphemeralMetadata } ephemeralMetadata;
+
+    // When putting a message in local storage we set the receivedTime
+    // ephemeral lifetime calculations
+    @mpackkey("rt") @jsonkey("rt")
+    gregor1.Time rtime;
   }
 
   // The same format as in KBFS (see libkbfs/data_types.go)
@@ -410,7 +443,7 @@
   enum RetentionPolicyType {
     NONE_0,
     RETAIN_1, // Keep messages forever
-    EXPIRE_2, // Delete afer a while
+    EXPIRE_2, // Delete after a while
     INHERIT_3 // Use the team's policy
   }
 

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keybase/client/go/chat/attachments"
 	"github.com/keybase/client/go/chat/globals"
 	"github.com/keybase/client/go/chat/msgchecker"
 	"github.com/keybase/client/go/chat/storage"
@@ -26,13 +27,13 @@ type BlockingSender struct {
 	utils.DebugLabeler
 
 	boxer *Boxer
-	store *AttachmentStore
+	store *attachments.Store
 	getRi func() chat1.RemoteInterface
 }
 
 var _ types.Sender = (*BlockingSender)(nil)
 
-func NewBlockingSender(g *globals.Context, boxer *Boxer, store *AttachmentStore,
+func NewBlockingSender(g *globals.Context, boxer *Boxer, store *attachments.Store,
 	getRi func() chat1.RemoteInterface) *BlockingSender {
 	return &BlockingSender{
 		Contextified: globals.NewContextified(g),
@@ -100,13 +101,13 @@ func (s *BlockingSender) addPrevPointersAndCheckConvID(ctx context.Context, msg 
 	if len(res.Messages) == 0 {
 		s.Debug(ctx, "no local messages found for prev pointers")
 	}
-	prevs, err = CheckPrevPointersAndGetUnpreved(&res)
+	prevs, _, err = CheckPrevPointersAndGetUnpreved(&res)
 	if err != nil {
 		return chat1.MessagePlaintext{}, err
 	}
 
 	if len(prevs) == 0 {
-		return chat1.MessagePlaintext{}, fmt.Errorf("Could not find previous messsages for prev pointers (of %v)", len(res.Messages))
+		return chat1.MessagePlaintext{}, fmt.Errorf("Could not find previous messages for prev pointers (of %v)", len(res.Messages))
 	}
 
 	for _, msg2 := range res.Messages {
@@ -488,11 +489,6 @@ func (s *BlockingSender) getSigningKeyPair(ctx context.Context) (kp libkb.NaclSi
 // deleteAssets deletes assets from s3.
 // Logs but does not return errors. Assets may be left undeleted.
 func (s *BlockingSender) deleteAssets(ctx context.Context, convID chat1.ConversationID, assets []chat1.Asset) error {
-	ri := s.getRi()
-	if ri == nil {
-		return fmt.Errorf("deleteAssets(): no remote client found")
-	}
-
 	// get s3 params from server
 	params, err := s.getRi().GetS3Params(ctx, convID)
 	if err != nil {
@@ -515,20 +511,16 @@ func (s *BlockingSender) deleteAssets(ctx context.Context, convID chat1.Conversa
 
 // Sign implements github.com/keybase/go/chat/s3.Signer interface.
 func (s *BlockingSender) Sign(payload []byte) ([]byte, error) {
-	ri := s.getRi()
-	if ri == nil {
-		return nil, fmt.Errorf("Sign(): no remote client found")
-	}
 	arg := chat1.S3SignArg{
 		Payload: payload,
 		Version: 1,
 	}
-	return ri.S3Sign(context.Background(), arg)
+	return s.getRi().S3Sign(context.Background(), arg)
 }
 
 func (s *BlockingSender) presentUIItem(conv *chat1.ConversationLocal) (res *chat1.InboxUIItem) {
 	if conv != nil {
-		pc := utils.PresentConversationLocal(*conv)
+		pc := utils.PresentConversationLocal(*conv, s.G().Env.GetUsername().String())
 		res = &pc
 	}
 	return res
@@ -541,11 +533,6 @@ func (s *BlockingSender) Send(ctx context.Context, convID chat1.ConversationID,
 	// Record that this user is "active in chat", which we use to determine
 	// gregor reconnect backoffs.
 	RecordChatSend(ctx, s.G(), s.DebugLabeler)
-
-	ri := s.getRi()
-	if ri == nil {
-		return chat1.OutboxID{}, nil, nil, fmt.Errorf("Send(): no remote client found")
-	}
 
 	// Get conversation metadata first. If we can't find it, we will just attempt to join
 	// the conversation in case that is an option. If it succeeds, then we just keep going,
@@ -635,7 +622,7 @@ func (s *BlockingSender) Send(ctx context.Context, convID chat1.ConversationID,
 			ChannelMention: chanMention,
 			TopicNameState: topicNameState,
 		}
-		plres, err = ri.PostRemote(ctx, rarg)
+		plres, err = s.getRi().PostRemote(ctx, rarg)
 		if err != nil {
 			switch err.(type) {
 			case libkb.ChatStalePreviousStateError:
@@ -667,9 +654,8 @@ func (s *BlockingSender) Send(ctx context.Context, convID chat1.ConversationID,
 	// Send up to frontend
 	if cerr == nil && boxed.GetMessageType() != chat1.MessageType_LEAVE {
 		activity := chat1.NewChatActivityWithIncomingMessage(chat1.IncomingMessage{
-			Message: utils.PresentMessageUnboxed(ctx, unboxedMsg, boxed.ClientHeader.Sender,
-				s.G().TeamChannelSource),
-			ConvID: convID,
+			Message: utils.PresentMessageUnboxed(ctx, s.G(), unboxedMsg, boxed.ClientHeader.Sender, convID),
+			ConvID:  convID,
 			DisplayDesktopNotification: false,
 			Conv: s.presentUIItem(convLocal),
 		})
@@ -820,7 +806,7 @@ func (s *Deliverer) Queue(ctx context.Context, convID chat1.ConversationID, msg 
 	identifyBehavior keybase1.TLFIdentifyBehavior) (obr chat1.OutboxRecord, err error) {
 	defer s.Trace(ctx, func() error { return err }, "Queue")()
 
-	// Push onto outbox and immediatley return
+	// Push onto outbox and immediately return
 	obr, err = s.outbox.PushMessage(ctx, convID, msg, outboxID, identifyBehavior)
 	if err != nil {
 		return obr, err
@@ -900,7 +886,7 @@ func (s *Deliverer) deliverLoop() {
 		// Wait for the signal to take action
 		select {
 		case cb := <-s.shutdownCh:
-			s.Debug(bgctx, "shuttting down outbox deliver loop: uid: %s", s.outbox.GetUID())
+			s.Debug(bgctx, "shutting down outbox deliver loop: uid: %s", s.outbox.GetUID())
 			defer close(cb)
 			return
 		case <-s.reconnectCh:

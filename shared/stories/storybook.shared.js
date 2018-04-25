@@ -6,6 +6,10 @@ import {type SelectorMap} from './storybook'
 import {Text, Box} from '../common-adapters'
 import {globalColors, globalStyles} from '../styles'
 
+const unexpected = (name: string) => () => {
+  throw new Error(`unexpected ${name}`)
+}
+
 /**
  * Creates a provider using a faux store of closures that compute derived viewProps
  * @param {SelectorMap} map an object of the form {DisplayName: Function(ownProps)} with
@@ -14,8 +18,11 @@ import {globalColors, globalStyles} from '../styles'
  *                       The Provider will ignore all dispatched actions. It also wraps the component
  *                       tree in an <ErrorBoundary /> that adds auxiliary info in case of an error.
  */
+// Redux doesn't allow swapping the store given a single provider so we use a new key to force a new provider to
+// work around this issue
+let uniqueProviderKey = 1
 const createPropProvider = (map: SelectorMap) => (story: () => React.Node) => (
-  <Provider store={createStore(state => state, map)}>
+  <Provider key={`provider:${uniqueProviderKey++}`} store={createStore(state => state, map)}>
     <StorybookErrorBoundary children={story()} />
   </Provider>
 )
@@ -51,7 +58,7 @@ class StorybookErrorBoundary extends React.Component<
           <Box
             style={{
               ...globalStyles.flexBoxColumn,
-              backgroundColor: globalColors.darkBlue4,
+              backgroundColor: globalColors.darkBlue3,
               borderRadius: 4,
               padding: 10,
               whiteSpace: 'pre-line',
@@ -68,5 +75,4 @@ class StorybookErrorBoundary extends React.Component<
     return this.props.children
   }
 }
-
-export {createPropProvider, StorybookErrorBoundary}
+export {unexpected, createPropProvider, StorybookErrorBoundary}

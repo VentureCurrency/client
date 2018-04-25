@@ -5,9 +5,7 @@ import electronComands from './electron'
 import fontCommands from './font'
 import fs from 'fs'
 import path from 'path'
-import visdiff from './visdiff'
 import {execSync} from 'child_process'
-import padEnd from 'lodash/padEnd'
 
 const [, , command, ...rest] = process.argv
 
@@ -15,13 +13,11 @@ const commands = {
   ...buildCommands,
   ...fontCommands,
   ...electronComands,
-  ...visdiff,
   help: {
     code: () => {
-      const len = Object.keys(commands).reduce((acc, i) => Math.max(i.length, acc), 1)
       console.log(
         Object.keys(commands)
-          .map(c => commands[c].help && `yarn run ${padEnd(c + ': ', len + 5)}${commands[c].help || ''}`)
+          .map(c => commands[c].help && `yarn run ${c}}${commands[c].help || ''}`)
           .filter(Boolean)
           .join('\n')
       )

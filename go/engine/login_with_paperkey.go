@@ -101,7 +101,7 @@ func (e *LoginWithPaperKey) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		e.G().Log.Debug("Stored secret with LKS from paperky")
+		e.G().Log.Debug("Stored secret with LKS from paperkey")
 
 		// This could prompt but shouldn't because of the secret store.
 		err = e.unlockDeviceKeys(ctx, me)
@@ -112,8 +112,16 @@ func (e *LoginWithPaperKey) Run(ctx *Context) error {
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 
-	return err
+	e.G().Log.Debug("LoginWithPaperkey success, sending login notification")
+	e.G().NotifyRouter.HandleLogin(string(e.G().Env.GetUsername()))
+	e.G().Log.Debug("LoginWithPaperkey success, calling login hooks")
+	e.G().CallLoginHooks()
+
+	return nil
 }
 
 func (e *LoginWithPaperKey) unlockDeviceKeys(ctx *Context, me *libkb.User) error {

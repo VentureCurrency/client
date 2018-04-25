@@ -1078,7 +1078,7 @@ func WrapError(e error) interface{} {
 var _ rpc.WrapErrorFunc = WrapError
 
 // ErrorUnwrapper is converter that take a Status object off the wire and convert it
-// into an Error that Go can understand, and you can descriminate on in your code.
+// into an Error that Go can understand, and you can discriminate on in your code.
 // Though status object can act as Go errors, you can further convert them into
 // typed errors via the Upcaster function if specified. An Upcaster takes a Status
 // and returns something that obeys the Error interface, but can be anything your
@@ -1315,6 +1315,14 @@ func (u UserPlusAllKeys) FindDevice(d DeviceID) *PublicKey {
 	return nil
 }
 
+func (u UserPlusKeysV2) GetUID() UID {
+	return u.Uid
+}
+
+func (u UserPlusKeysV2) GetName() string {
+	return u.Username
+}
+
 func (u UserPlusKeysV2AllIncarnations) FindDevice(d DeviceID) *PublicKeyV2NaCl {
 	for _, k := range u.Current.DeviceKeys {
 		if k.DeviceID.Eq(d) {
@@ -1365,6 +1373,40 @@ func (u UserPlusKeysV2) FindDeviceKey(needle KID) *PublicKeyV2NaCl {
 		}
 	}
 	return nil
+}
+
+func (u UserPlusKeysV2) FindSigningDeviceKey(d DeviceID) (*PublicKeyV2NaCl, string) {
+	for _, k := range u.DeviceKeys {
+		if k.DeviceID.Eq(d) && k.Base.IsSibkey {
+			return &k, k.DeviceDescription
+		}
+	}
+	return nil, ""
+}
+
+func (u UserPlusKeysV2) FindSigningDeviceKID(d DeviceID) (KID, string) {
+	key, name := u.FindSigningDeviceKey(d)
+	if key == nil {
+		return KID(""), name
+	}
+	return key.Base.Kid, name
+}
+
+func (u UserPlusKeysV2) FindEncryptionDeviceKey(parent KID) *PublicKeyV2NaCl {
+	for _, k := range u.DeviceKeys {
+		if !k.Base.IsSibkey && k.Parent != nil && k.Parent.Equal(parent) {
+			return &k
+		}
+	}
+	return nil
+}
+
+func (u UserPlusKeysV2) FindEncryptionDeviceKID(parent KID) KID {
+	key := u.FindEncryptionDeviceKey(parent)
+	if key == nil {
+		return KID("")
+	}
+	return key.Base.Kid
 }
 
 func (s ChatConversationID) String() string {
@@ -1674,6 +1716,13 @@ func (u UserVersionPercentForm) String() string {
 	return string(u)
 }
 
+func NewUserVersion(uid UID, eldestSeqno Seqno) UserVersion {
+	return UserVersion{
+		Uid:         uid,
+		EldestSeqno: eldestSeqno,
+	}
+}
+
 func (u UserVersion) PercentForm() UserVersionPercentForm {
 	return UserVersionPercentForm(u.String())
 }
@@ -1979,6 +2028,20 @@ func (u UserPlusKeysV2) GetLatestPerUserKey() *PerUserKey {
 	return nil
 }
 
+// Can return nil.
+func (u UserPlusKeysV2) GetPerUserKeyByGen(gen PerUserKeyGeneration) *PerUserKey {
+	genint := int(gen)
+	if genint <= 0 || genint > len(u.PerUserKeys) {
+		return nil
+	}
+	puk := u.PerUserKeys[genint-1]
+	if puk.Gen != genint {
+		// The PerUserKeys field of this object is malformed
+		return nil
+	}
+	return &puk
+}
+
 func (s PerTeamKeySeed) ToBytes() []byte { return s[:] }
 
 func (s PerTeamKeySeed) IsZero() bool {
@@ -2217,6 +2280,11 @@ func (t TLFVisibility) Eq(r TLFVisibility) bool {
 func ParseUserVersion(s UserVersionPercentForm) (res UserVersion, err error) {
 	parts := strings.Split(string(s), "%")
 	if len(parts) == 1 {
+		// NOTE: We have to keep it the way it is, even though we
+		// never save UIDs without EldestSeqno anywhere. There may be
+		// team chain which have UVs encoded with default eldest=1 in
+		// the wild.
+
 		// default to seqno 1
 		parts = append(parts, "1")
 	}
@@ -2275,6 +2343,13 @@ func (req *TeamChangeReq) AddUVWithRole(uv UserVersion, role TeamRole) error {
 	return nil
 }
 
+func (req *TeamChangeReq) CompleteInviteID(inviteID TeamInviteID, uv UserVersionPercentForm) {
+	if req.CompletedInvites == nil {
+		req.CompletedInvites = make(map[TeamInviteID]UserVersionPercentForm)
+	}
+	req.CompletedInvites[inviteID] = uv
+}
+
 func (req *TeamChangeReq) GetAllAdds() (ret []UserVersion) {
 	ret = append(ret, req.Readers...)
 	ret = append(ret, req.Writers...)
@@ -2327,33 +2402,14 @@ func (r ResetLink) Summarize() ResetSummary {
 	}
 }
 
-// CheckInvariants checks that the bundle satisfies
-// 1. No duplicate account IDs
-// 2. At most one primary account
-func (s StellarSecretBundle) CheckInvariants() error {
-	accountIDs := make(map[StellarAccountID]bool)
-	names := make(map[string]bool)
-	var foundPrimary bool
-	for _, entry := range s.Accounts {
-		_, found := accountIDs[entry.AccountID]
-		if found {
-			return fmt.Errorf("duplicate account ID: %v", entry.AccountID)
-		}
-		accountIDs[entry.AccountID] = true
-		_, found = names[entry.Name]
-		if found {
-			return fmt.Errorf("duplicate account name: %v", entry.Name)
-		}
-		names[entry.Name] = true
-		if entry.IsPrimary {
-			if foundPrimary {
-				return errors.New("multiple primary accounts")
-			}
-			foundPrimary = true
-		}
-	}
-	if s.Revision < 1 {
-		return fmt.Errorf("revision %v < 1", s.Revision)
-	}
-	return nil
+func (f AvatarFormat) String() string {
+	return string(f)
+}
+
+func (u AvatarUrl) String() string {
+	return string(u)
+}
+
+func MakeAvatarURL(u string) AvatarUrl {
+	return AvatarUrl(u)
 }

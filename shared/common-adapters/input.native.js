@@ -5,10 +5,10 @@ import React, {Component} from 'react'
 import Box from './box'
 import Text, {getStyle as getTextStyle} from './text'
 import {NativeTextInput} from './native-wrappers.native'
-import {globalStyles, globalColors, styleSheetCreate} from '../styles'
-import {isIOS} from '../constants/platform'
+import {collapseStyles, globalStyles, globalColors, styleSheetCreate} from '../styles'
+import {isIOS, isAndroid} from '../constants/platform'
 
-import type {Props} from './input'
+import type {KeyboardType, Props} from './input'
 
 type State = {
   focused: boolean,
@@ -19,7 +19,7 @@ type State = {
 
 class Input extends Component<Props, State> {
   state: State
-  _input: any
+  _input: NativeTextInput | null
 
   constructor(props: Props) {
     super(props)
@@ -32,20 +32,22 @@ class Input extends Component<Props, State> {
     }
   }
 
-  setNativeProps(props: Object) {
-    this._input && this._input.setNativeProps(props)
+  // Does nothing on mobile
+  select = () => {}
+  // Does nothing on mobile
+  moveCursorToEnd = () => {}
+
+  // Needed to support wrapping with e.g. a ClickableBox. See
+  // https://facebook.github.io/react-native/docs/direct-manipulation.html .
+  setNativeProps = (nativeProps: Object) => {
+    this._input && this._input.setNativeProps(nativeProps)
   }
 
-  componentWillReceiveProps(nextProps: Props) {
+  static getDerivedStateFromProps(nextProps: Props, prevState: State) {
     if (nextProps.hasOwnProperty('value')) {
-      this.setState({value: nextProps.value || ''})
+      return {value: nextProps.value || ''}
     }
-  }
-
-  componentWillUpdate(nextProps: Props) {
-    if (nextProps.type !== this.props.type) {
-      this._setPasswordVisible(nextProps.type === 'passwordVisible')
-    }
+    return null
   }
 
   _onContentSizeChange = event => {
@@ -54,7 +56,8 @@ class Input extends Component<Props, State> {
       event &&
       event.nativeEvent &&
       event.nativeEvent.contentSize &&
-      event.nativeEvent.contentSize.height
+      event.nativeEvent.contentSize.height &&
+      event.nativeEvent.contentSize.width
     ) {
       let height = event.nativeEvent.contentSize.height
       const minHeight = this.props.rowsMin && this._rowsToHeight(this.props.rowsMin)
@@ -71,58 +74,34 @@ class Input extends Component<Props, State> {
     }
   }
 
-  _setPasswordVisible(passwordVisible: boolean) {
-    // $FlowIssue
-    this._textInput && this._textInput.setNativeProps({passwordVisible})
-  }
-
   getValue(): string {
     return this.state.value || ''
   }
 
-  setValue(value: string) {
-    this.setState({value: value || ''})
-  }
-
-  clearValue() {
-    this._onChangeText('')
-  }
-
-  replaceText(text: string, startIdx: number, endIdx: number) {
-    const existingText = this.state.value
-    const nextText = existingText.slice(0, startIdx) + text + existingText.slice(endIdx)
-    this._onChangeText(nextText)
-  }
-
   _onChangeText = (text: string) => {
-    this.setState({value: text || ''}, () => this.props.onChangeText && this.props.onChangeText(text || ''))
+    this.setState({value: text}, () => this.props.onChangeText && this.props.onChangeText(text))
   }
 
   focus() {
     this._input && this._input.focus()
   }
 
-  select() {
-    // Apparently this doens't work on mobile?
-    // this._input && this._input.select()
-  }
-
-  moveCursorToEnd = () => {
-    // not implemented on mobile
-  }
-
   blur() {
     this._input && this._input.blur()
   }
 
-  _onKeyDown = (e: SyntheticKeyboardEvent<>) => {
-    if (this.props.onKeyDown) {
-      this.props.onKeyDown(e, false)
-    }
-
-    if (this.props.onEnterKeyDown && e.key === 'Enter') {
-      this.props.onEnterKeyDown(e)
-    }
+  replaceText = (
+    text: string,
+    startIdx: number,
+    endIdx: number,
+    newSelectionStart: number,
+    newSelectionEnd: number
+  ) => {
+    const v = this.getValue()
+    const nextText = v.slice(0, startIdx) + text + v.slice(endIdx)
+    this._onChangeText(nextText)
+    // TODO: Set selection to newSelectionStart/newSelectionEnd once
+    // we're able to.
   }
 
   _onFocus = () => {
@@ -175,14 +154,22 @@ class Input extends Component<Props, State> {
         }
   }
 
-  _onSelectionChange = (event: any) => {
-    this.setState({
-      selections: {
-        selectionStart: event.nativeEvent.selection.start,
-        selectionEnd: event.nativeEvent.selection.end,
+  _onSelectionChange = (event: {nativeEvent: {selection: {start: number, end: number}}}) => {
+    let {start, end} = event.nativeEvent.selection
+    // Work around Android bug which sometimes puts end before start:
+    // https://github.com/facebook/react-native/issues/18579 .
+    const selectionStart = Math.min(start, end)
+    const selectionEnd = Math.max(start, end)
+    const selection = {
+      selectionStart,
+      selectionEnd,
+    }
+    this.setState(
+      {
+        selections: selection,
       },
-    })
-    this.props.onSelectionChange && this.props.onSelectionChange(event)
+      () => this.props.onSelectionChange && this.props.onSelectionChange(selection)
+    )
   }
 
   // WARNING may not be up to date in time sensitive situations
@@ -221,9 +208,10 @@ class Input extends Component<Props, State> {
 
     const multilineStyle = {
       ...commonInputStyle,
-      paddingTop: 0,
-      paddingBottom: 0,
+      height: undefined,
       minHeight: this._rowsToHeight(this.props.rowsMin || defaultRowsToShow),
+      paddingBottom: 0,
+      paddingTop: 0,
       ...(this.props.rowsMax ? {maxHeight: this._rowsToHeight(this.props.rowsMax)} : null),
     }
 
@@ -232,54 +220,67 @@ class Input extends Component<Props, State> {
       multilineStyle.height = this.state.height
     }
 
+    const value = this.getValue()
+
     const floatingHintText =
-      !!this.state.value.length &&
+      !!value.length &&
       (this.props.hasOwnProperty('floatingHintTextOverride')
         ? this.props.floatingHintTextOverride
         : this.props.hintText || ' ')
 
+    let keyboardType: ?KeyboardType = this.props.keyboardType
+    if (!keyboardType) {
+      if (isAndroid && this.props.type === 'passwordVisible') {
+        keyboardType = 'visible-password'
+      } else {
+        // Defers to secureTextEntry when props.type === 'password'.
+        keyboardType = 'default'
+      }
+    }
+
+    // We want to be able to set the selection property,
+    // too. Unfortunately, that triggers an Android crash:
+    // https://github.com/facebook/react-native/issues/18316 .
     const commonProps = {
       autoCorrect: this.props.hasOwnProperty('autoCorrect') && this.props.autoCorrect,
       autoCapitalize: this.props.autoCapitalize || 'none',
       editable: this.props.hasOwnProperty('editable') ? this.props.editable : true,
-      keyboardType: this.props.keyboardType,
+      keyboardType,
       autoFocus: this.props.autoFocus,
       onBlur: this._onBlur,
       onChangeText: this._onChangeText,
       onFocus: this._onFocus,
-      onKeyDown: this._onKeyDown,
       onSelectionChange: this._onSelectionChange,
       onSubmitEditing: this.props.onEnterKeyDown,
       onEndEditing: this.props.onEndEditing,
       placeholder: this.props.hintText,
-      ref: r => {
+      ref: (r: NativeTextInput | null) => {
         this._input = r
       },
       returnKeyType: this.props.returnKeyType,
-      value: this.state.value,
+      value,
       secureTextEntry: this.props.type === 'password',
       underlineColorAndroid: 'transparent',
       ...(this.props.maxLength ? {maxlength: this.props.maxLength} : null),
     }
 
+    if (this.props.uncontrolled) {
+      delete commonProps['value']
+    }
+
     const singlelineProps = {
       ...commonProps,
       multiline: false,
-      style: {...singlelineStyle, ...this.props.inputStyle},
-      type:
-        {
-          password: 'password',
-          text: 'text',
-          passwordVisible: 'text',
-        }[this.props.type || 'text'] || 'text',
+      style: collapseStyles([singlelineStyle, this.props.inputStyle]),
     }
 
     const multilineProps = {
       ...commonProps,
       multiline: true,
       blurOnSubmit: false,
-      onContentSizeChange: isIOS ? this._onContentSizeChange : null,
-      style: {...multilineStyle, ...this.props.inputStyle},
+      onContentSizeChange: this._onContentSizeChange,
+      style: collapseStyles([multilineStyle, this.props.inputStyle]),
+      ...(this.props.rowsMax ? {maxHeight: this._rowsToHeight(this.props.rowsMax)} : {}),
     }
 
     return (
@@ -291,7 +292,10 @@ class Input extends Component<Props, State> {
         )}
         {!!this.props.small &&
           !!this.props.smallLabel && (
-            <Text type="BodySmall" style={[styles.smallLabel, {lineHeight}, this.props.smallLabelStyle]}>
+            <Text
+              type="BodySmall"
+              style={collapseStyles([styles.smallLabel, {lineHeight}, this.props.smallLabelStyle])}
+            >
               {this.props.smallLabel}
             </Text>
           )}
@@ -305,7 +309,7 @@ class Input extends Component<Props, State> {
           <NativeTextInput {...(this.props.multiline ? multilineProps : singlelineProps)} />
         </Box>
         {!this.props.small && (
-          <Text type="BodyError" style={[styles.error, this.props.errorStyle]}>
+          <Text type="BodyError" style={collapseStyles([styles.error, this.props.errorStyle])}>
             {this.props.errorText || ''}
           </Text>
         )}

@@ -1,6 +1,6 @@
 // @flow
 import * as I from 'immutable'
-import isEqualWith from 'lodash/isEqualWith'
+import {isEqualWith} from 'lodash-es'
 import {createSelector, createSelectorCreator, defaultMemoize} from 'reselect'
 
 const createShallowEqualSelector = createSelectorCreator(defaultMemoize, (a, b) =>
@@ -8,6 +8,8 @@ const createShallowEqualSelector = createSelectorCreator(defaultMemoize, (a, b) 
 )
 
 const createImmutableEqualSelector = createSelectorCreator(defaultMemoize, I.is)
+
+const NullComponent = () => null
 
 export {connect} from 'react-redux'
 export {
@@ -32,6 +34,7 @@ export {
   createSelector,
   createSelectorCreator,
   defaultMemoize,
+  NullComponent,
 }
 export {Dispatch} from '../constants/types/flux'
 export {isMobile} from '../constants/platform'

@@ -65,19 +65,23 @@ type GlobalContext struct {
 	AppState         *AppState            // The state of focus for the currently running instance of the app
 	ChatHelper       ChatHelper           // conveniently send chat messages
 
-	cacheMu         *sync.RWMutex   // protects all caches
-	ProofCache      *ProofCache     // where to cache proof results
-	TrackCache      *TrackCache     // cache of IdentifyOutcomes for tracking purposes
-	Identify2Cache  Identify2Cacher // cache of Identify2 results for fast-pathing identify2 RPCS
-	LinkCache       *LinkCache      // cache of ChainLinks
-	upakLoader      UPAKLoader      // Load flat users with the ability to hit the cache
-	teamLoader      TeamLoader      // Play back teams for id/name properties
-	deviceEKStorage DeviceEKStorage // Store device ephemeral keys
-	itciCacher      LRUer           // Cacher for implicit team conflict info
-	CardCache       *UserCardCache  // cache of keybase1.UserCard objects
-	fullSelfer      FullSelfer      // a loader that gets the full self object
-	pvlSource       PvlSource       // a cache and fetcher for pvl
-	PayloadCache    *PayloadCache   // cache of ChainLink payload json wrappers
+	cacheMu          *sync.RWMutex    // protects all caches
+	ProofCache       *ProofCache      // where to cache proof results
+	TrackCache       *TrackCache      // cache of IdentifyOutcomes for tracking purposes
+	Identify2Cache   Identify2Cacher  // cache of Identify2 results for fast-pathing identify2 RPCS
+	LinkCache        *LinkCache       // cache of ChainLinks
+	upakLoader       UPAKLoader       // Load flat users with the ability to hit the cache
+	teamLoader       TeamLoader       // Play back teams for id/name properties
+	stellar          Stellar          // Stellar related ops
+	deviceEKStorage  DeviceEKStorage  // Store device ephemeral keys
+	userEKBoxStorage UserEKBoxStorage // Store user ephemeral key boxes
+	teamEKBoxStorage TeamEKBoxStorage // Store team ephemeral key boxes
+	ekLib            EKLib            // Wrapper to call ephemeral key methods
+	itciCacher       LRUer            // Cacher for implicit team conflict info
+	CardCache        *UserCardCache   // cache of keybase1.UserCard objects
+	fullSelfer       FullSelfer       // a loader that gets the full self object
+	pvlSource        PvlSource        // a cache and fetcher for pvl
+	PayloadCache     *PayloadCache    // cache of ChainLink payload json wrappers
 
 	GpgClient        *GpgCLI        // A standard GPG-client (optional)
 	ShutdownHooks    []ShutdownHook // on shutdown, fire these...
@@ -112,7 +116,7 @@ type GlobalContext struct {
 	logoutHooks        []LogoutHook              // call these on logout
 	GregorDismisser    GregorDismisser           // for dismissing gregor items that we've handled
 	GregorListener     GregorListener            // for alerting about clients connecting and registering UI protocols
-	oodiMu             *sync.RWMutex             // For manipluating the OutOfDateInfo
+	oodiMu             *sync.RWMutex             // For manipulating the OutOfDateInfo
 	outOfDateInfo      *keybase1.OutOfDateInfo   // Stores out of date messages we got from API server headers.
 	lastUpgradeWarning *time.Time                // When the last upgrade was warned for (to reate-limit nagging)
 
@@ -155,6 +159,7 @@ func (g *GlobalContext) GetEnv() *Env                                  { return 
 func (g *GlobalContext) GetDNSNameServerFetcher() DNSNameServerFetcher { return g.DNSNSFetcher }
 func (g *GlobalContext) GetKVStore() KVStorer                          { return g.LocalDb }
 func (g *GlobalContext) GetClock() clockwork.Clock                     { return g.Clock() }
+func (g *GlobalContext) GetEKLib() EKLib                               { return g.ekLib }
 
 type LogGetter func() logger.Logger
 
@@ -206,6 +211,8 @@ func (g *GlobalContext) SetCommandLine(cmd CommandLine) { g.Env.SetCommandLine(c
 
 func (g *GlobalContext) SetUI(u UI) { g.UI = u }
 
+func (g *GlobalContext) SetEKLib(ekLib EKLib) { g.ekLib = ekLib }
+
 func (g *GlobalContext) Init() *GlobalContext {
 	g.Env = NewEnv(nil, nil, g.GetLog)
 	g.Service = false
@@ -214,10 +221,12 @@ func (g *GlobalContext) Init() *GlobalContext {
 	g.RateLimits = NewRateLimits(g)
 	g.upakLoader = NewUncachedUPAKLoader(g)
 	g.teamLoader = newNullTeamLoader(g)
+	g.stellar = newNullStellar(g)
 	g.fullSelfer = NewUncachedFullSelf(g)
 	g.ConnectivityMonitor = NullConnectivityMonitor{}
 	g.localSigchainGuard = NewLocalSigchainGuard(g)
 	g.AppState = NewAppState(g)
+
 	return g
 }
 
@@ -267,6 +276,21 @@ func (g *GlobalContext) LoginState() *LoginState {
 	return g.loginState
 }
 
+// resetFullSelferWithLoginStateLock is used to clear the fullSelfer
+// when a loginStateMu is held. This is trickier than it ought to be because
+// of deadlock potential. If we try to reach inside our existing CachedFullSelf
+// and grab the mutex that protects the me object (to clear it), we chance calling
+// into LoadUser, which can attemp to grab the login state, which would deadlock.
+// So just do the stupid thing, which is to throw away the existing CachedFullSelf
+// and swap in a new one.
+func (g *GlobalContext) resetFullSelferWithLoginStateLock() {
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
+	if g.fullSelfer != nil {
+		g.fullSelfer = g.fullSelfer.New()
+	}
+}
+
 func (g *GlobalContext) Logout() error {
 	g.loginStateMu.Lock()
 	defer g.loginStateMu.Unlock()
@@ -293,11 +317,16 @@ func (g *GlobalContext) Logout() error {
 		g.CardCache.Shutdown()
 	}
 
-	g.GetFullSelfer().OnLogout()
+	g.resetFullSelferWithLoginStateLock()
 
 	tl := g.teamLoader
 	if tl != nil {
 		tl.OnLogout()
+	}
+
+	st := g.stellar
+	if st != nil {
+		st.OnLogout()
 	}
 
 	g.TrackCache = NewTrackCache()
@@ -488,10 +517,28 @@ func (g *GlobalContext) GetTeamLoader() TeamLoader {
 	return g.teamLoader
 }
 
+func (g *GlobalContext) GetStellar() Stellar {
+	g.cacheMu.RLock()
+	defer g.cacheMu.RUnlock()
+	return g.stellar
+}
+
 func (g *GlobalContext) GetDeviceEKStorage() DeviceEKStorage {
 	g.cacheMu.RLock()
 	defer g.cacheMu.RUnlock()
 	return g.deviceEKStorage
+}
+
+func (g *GlobalContext) GetUserEKBoxStorage() UserEKBoxStorage {
+	g.cacheMu.RLock()
+	defer g.cacheMu.RUnlock()
+	return g.userEKBoxStorage
+}
+
+func (g *GlobalContext) GetTeamEKBoxStorage() TeamEKBoxStorage {
+	g.cacheMu.RLock()
+	defer g.cacheMu.RUnlock()
+	return g.teamEKBoxStorage
 }
 
 func (g *GlobalContext) GetImplicitTeamConflictInfoCacher() LRUer {
@@ -543,7 +590,7 @@ func (g *GlobalContext) Shutdown() error {
 
 		// loginState request loop should be shut down first
 		// so that any active requests can use all of the
-		// services that are about to be shutdown below.
+		// services that are about to be shut down below.
 		// (for example, g.LocalDb)
 		g.loginStateMu.Lock()
 		if g.loginState != nil {
@@ -698,6 +745,14 @@ func (g *GlobalContext) GetGpgClient() *GpgCLI {
 
 func (g *GlobalContext) GetMyUID() keybase1.UID {
 	var uid keybase1.UID
+
+	// Prefer ActiveDevice, that's the prefered way
+	// to figure out what the current user's UID is.
+	// We are phasing out LoginState().
+	uid = g.ActiveDevice.UID()
+	if uid.Exists() {
+		return uid
+	}
 
 	g.LoginState().LocalSession(func(s *Session) {
 		uid = s.GetUID()
@@ -920,6 +975,11 @@ func (g *GlobalContext) LogoutIfRevoked() error {
 		return nil
 	}
 
+	if g.Env.GetSkipLogoutIfRevokedCheck() {
+		g.Log.Debug("LogoutIfRevoked: skipping check (SkipLogoutIfRevokedCheck)")
+		return nil
+	}
+
 	me, err := LoadMe(NewLoadUserForceArg(g))
 	if err != nil {
 		return err
@@ -998,25 +1058,33 @@ func (g *GlobalContext) SetTeamLoader(l TeamLoader) {
 	g.teamLoader = l
 }
 
+func (g *GlobalContext) SetStellar(s Stellar) {
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
+	g.stellar = s
+}
+
 func (g *GlobalContext) SetDeviceEKStorage(s DeviceEKStorage) {
 	g.cacheMu.Lock()
 	defer g.cacheMu.Unlock()
 	g.deviceEKStorage = s
 }
 
+func (g *GlobalContext) SetUserEKBoxStorage(s UserEKBoxStorage) {
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
+	g.userEKBoxStorage = s
+}
+
+func (g *GlobalContext) SetTeamEKBoxStorage(s TeamEKBoxStorage) {
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
+	g.teamEKBoxStorage = s
+}
+
 func (g *GlobalContext) LoadUserByUID(uid keybase1.UID) (*User, error) {
 	arg := NewLoadUserByUIDArg(nil, g, uid).WithPublicKeyOptional()
 	return LoadUser(arg)
-}
-
-func (g *GlobalContext) UIDToUsername(uid keybase1.UID) (NormalizedUsername, error) {
-	q := NewHTTPArgs()
-	q.Add("uid", UIDArg(uid))
-	leaf, err := g.MerkleClient.LookupUser(g.NetContext, q, nil)
-	if err != nil {
-		return NormalizedUsername(""), err
-	}
-	return NewNormalizedUsername(leaf.username), nil
 }
 
 func (g *GlobalContext) BustLocalUserCache(u keybase1.UID) {
@@ -1195,4 +1263,45 @@ func (g *GlobalContext) SetSecretStoreNilForTests(t *testing.T) {
 	defer g.secretStoreMu.Unlock()
 
 	g.secretStore = nil
+}
+
+// AssertTemporarySession asserts that the user has an old-fashioned
+// session token. Should only be necessary on login/provisioning flow.
+func (g *GlobalContext) AssertTemporarySession(lctx LoginContext) error {
+
+	run := func(lctx LoginContext) error {
+		sess := lctx.LocalSession()
+		if sess == nil {
+			return LoginRequiredError{"no session object loaded"}
+		}
+		if !sess.IsValid() {
+			return LoginRequiredError{"session isn't valid"}
+		}
+		return nil
+	}
+
+	if lctx != nil {
+		return run(lctx)
+	}
+	var gerr error
+	aerr := g.LoginState().Account(func(a *Account) {
+		gerr = run(a)
+	}, "AssertTemporarySession")
+	if aerr != nil {
+		return aerr
+	}
+	return gerr
+}
+
+func (g *GlobalContext) IsOneshot(ctx context.Context) (bool, error) {
+	uc, err := g.Env.GetConfig().GetUserConfig()
+	if err != nil {
+		g.Log.CDebugf(ctx, "IsOneshot: Error getting a user config: %s", err)
+		return false, err
+	}
+	if uc == nil {
+		g.Log.CDebugf(ctx, "IsOneshot: nil user config")
+		return false, nil
+	}
+	return uc.IsOneshot(), nil
 }

@@ -172,7 +172,7 @@ func (k *PGPKeyBundle) StripRevocations() (strippedKey *PGPKeyBundle) {
 	strippedKey.Subkeys = nil
 	for _, subkey := range oldSubkeys {
 		// Skip revoked subkeys
-		if subkey.Sig.SigType == packet.SigTypeSubkeyBinding {
+		if subkey.Sig.SigType == packet.SigTypeSubkeyBinding && subkey.Revocation == nil {
 			strippedKey.Subkeys = append(strippedKey.Subkeys, subkey)
 		}
 	}
@@ -567,7 +567,7 @@ func (k *PGPKeyBundle) HasSecretKey() bool {
 
 // FindPGPPrivateKey checks if supposed secret key PGPKeyBundle
 // contains any valid PrivateKey entities. Sometimes primary private
-// key is stupped out but there are subkeys with secret keys.
+// key is stoopped out but there are subkeys with secret keys.
 func FindPGPPrivateKey(k *PGPKeyBundle) bool {
 	if k.PrivateKey.PrivateKey != nil {
 		return true

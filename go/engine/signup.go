@@ -9,6 +9,7 @@ import (
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/keybase1"
 	triplesec "github.com/keybase/go-triplesec"
+	context "golang.org/x/net/context"
 )
 
 type SignupEngine struct {
@@ -122,7 +123,7 @@ func (s *SignupEngine) Run(ctx *Context) error {
 		if wantsGPG, err := s.checkGPG(ctx); err != nil {
 			return err
 		} else if wantsGPG {
-			if err := s.addGPG(a, ctx, true); err != nil {
+			if err := s.addGPG(a, ctx, true, true); err != nil {
 				return fmt.Errorf("addGPG error: %s", err)
 			}
 		}
@@ -141,6 +142,10 @@ func (s *SignupEngine) Run(ctx *Context) error {
 
 	// For instance, setup gregor and friends...
 	s.G().CallLoginHooks()
+
+	go func() {
+		s.G().GetStellar().CreateWalletSoft(context.Background())
+	}()
 
 	return nil
 
@@ -282,12 +287,13 @@ func (s *SignupEngine) checkGPG(ctx *Context) (bool, error) {
 	return eng.WantsGPG(ctx)
 }
 
-func (s *SignupEngine) addGPG(lctx libkb.LoginContext, ctx *Context, allowMulti bool) error {
-	s.G().Log.Debug("SignupEngine.addGPG.  signingKey: %v\n", s.signingKey)
-	arg := GPGImportKeyArg{Signer: s.signingKey, AllowMulti: allowMulti, Me: s.me, Lks: s.lks}
+func (s *SignupEngine) addGPG(lctx libkb.LoginContext, ctx *Context, allowMulti bool, hasProvisionedDevice bool) (err error) {
+	defer s.G().CTrace(ctx.NetContext, fmt.Sprintf("SignupEngine.addGPG(signingKey: %v)", s.signingKey), func() error { return err })()
+
+	arg := GPGImportKeyArg{Signer: s.signingKey, AllowMulti: allowMulti, Me: s.me, Lks: s.lks, HasProvisionedDevice: hasProvisionedDevice}
 	eng := NewGPGImportKeyEngine(&arg, s.G())
 	ctx.LoginContext = lctx
-	if err := RunEngine(eng, ctx); err != nil {
+	if err = RunEngine(eng, ctx); err != nil {
 		return err
 	}
 

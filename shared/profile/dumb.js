@@ -231,7 +231,6 @@ const following = [
 
 const propsBase: RenderProps = {
   ...mockUserInfo,
-  showComingSoon: false,
   isYou: false,
   loading: false,
   bioEditFns: null,
@@ -241,6 +240,7 @@ const propsBase: RenderProps = {
   followers,
   following,
   error: null,
+  serverActive: false,
   trackerState: normal,
   currentlyFollowing: false,
   currentFriendshipsTab: 'Followers',
@@ -271,7 +271,9 @@ const propsBase: RenderProps = {
   onClickFollowing: () => console.log('on click following'),
   onSearch: () => console.log('on search'),
   onClickShowcased: () => console.log('on click showcased'),
+  onClickShowcaseOffer: () => console.log('on click showcase offer'),
   waiting: false,
+  youAreInTeams: false,
 }
 
 const bioEditFns = {

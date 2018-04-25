@@ -12,6 +12,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/keybase/client/go/engine"
+	"github.com/keybase/client/go/kex2"
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/keybase1"
 )
@@ -60,7 +61,7 @@ func (fu *FakeUser) GetUserVersion() keybase1.UserVersion {
 
 func (fu *FakeUser) Login(g *libkb.GlobalContext) error {
 	ctx := &engine.Context{
-		ProvisionUI: &testProvisionUI{},
+		ProvisionUI: &TestProvisionUI{},
 		LogUI:       g.UI.GetLogUI(),
 		GPGUI:       &gpgtestui{},
 		SecretUI:    fu.NewSecretUI(),
@@ -120,6 +121,15 @@ func ResetAccount(tc libkb.TestContext, u *FakeUser) {
 	Logout(tc)
 }
 
+func DeleteAccount(tc libkb.TestContext, u *FakeUser) {
+	err := tc.G.LoginState().DeleteAccount(u.Username)
+	if err != nil {
+		tc.T.Fatalf("In delete: %s", err)
+	}
+	tc.T.Logf("Account deleted for user %s", u.Username)
+	Logout(tc)
+}
+
 // copied from engine/common_test.go
 func Logout(tc libkb.TestContext) {
 	if err := tc.G.Logout(); err != nil {
@@ -128,7 +138,7 @@ func Logout(tc libkb.TestContext) {
 }
 
 func AssertProvisioned(tc libkb.TestContext) error {
-	prov, err := tc.G.LoginState().LoggedInProvisionedCheck()
+	prov, err := tc.G.LoginState().LoggedInProvisioned(context.TODO())
 	if err != nil {
 		return err
 	}
@@ -138,47 +148,51 @@ func AssertProvisioned(tc libkb.TestContext) error {
 	return nil
 }
 
-type testProvisionUI struct {
+type TestProvisionUI struct {
+	SecretCh chan kex2.Secret
 }
 
-func (u *testProvisionUI) ChooseProvisioningMethod(_ context.Context, _ keybase1.ChooseProvisioningMethodArg) (keybase1.ProvisionMethod, error) {
+func (u *TestProvisionUI) ChooseProvisioningMethod(_ context.Context, _ keybase1.ChooseProvisioningMethodArg) (keybase1.ProvisionMethod, error) {
 	panic("ChooseProvisioningMethod deprecated")
 }
 
-func (u *testProvisionUI) ChooseGPGMethod(_ context.Context, _ keybase1.ChooseGPGMethodArg) (keybase1.GPGMethod, error) {
+func (u *TestProvisionUI) ChooseGPGMethod(_ context.Context, _ keybase1.ChooseGPGMethodArg) (keybase1.GPGMethod, error) {
 	return keybase1.GPGMethod_GPG_NONE, nil
 }
 
-func (u *testProvisionUI) SwitchToGPGSignOK(ctx context.Context, arg keybase1.SwitchToGPGSignOKArg) (bool, error) {
+func (u *TestProvisionUI) SwitchToGPGSignOK(ctx context.Context, arg keybase1.SwitchToGPGSignOKArg) (bool, error) {
 	return true, nil
 }
 
-func (u *testProvisionUI) ChooseDevice(_ context.Context, arg keybase1.ChooseDeviceArg) (keybase1.DeviceID, error) {
+func (u *TestProvisionUI) ChooseDevice(_ context.Context, arg keybase1.ChooseDeviceArg) (keybase1.DeviceID, error) {
 	return "", nil
 }
 
-func (u *testProvisionUI) ChooseDeviceType(_ context.Context, _ keybase1.ChooseDeviceTypeArg) (keybase1.DeviceType, error) {
+func (u *TestProvisionUI) ChooseDeviceType(_ context.Context, _ keybase1.ChooseDeviceTypeArg) (keybase1.DeviceType, error) {
 	return keybase1.DeviceType_DESKTOP, nil
 }
 
-func (u *testProvisionUI) DisplayAndPromptSecret(_ context.Context, arg keybase1.DisplayAndPromptSecretArg) (keybase1.SecretResponse, error) {
+func (u *TestProvisionUI) DisplayAndPromptSecret(_ context.Context, arg keybase1.DisplayAndPromptSecretArg) (keybase1.SecretResponse, error) {
+	var ks kex2.Secret
+	copy(ks[:], arg.Secret)
+	u.SecretCh <- ks
 	var sr keybase1.SecretResponse
 	return sr, nil
 }
 
-func (u *testProvisionUI) PromptNewDeviceName(_ context.Context, arg keybase1.PromptNewDeviceNameArg) (string, error) {
+func (u *TestProvisionUI) PromptNewDeviceName(_ context.Context, arg keybase1.PromptNewDeviceNameArg) (string, error) {
 	return libkb.RandString("device", 5)
 }
 
-func (u *testProvisionUI) DisplaySecretExchanged(_ context.Context, _ int) error {
+func (u *TestProvisionUI) DisplaySecretExchanged(_ context.Context, _ int) error {
 	return nil
 }
 
-func (u *testProvisionUI) ProvisioneeSuccess(_ context.Context, _ keybase1.ProvisioneeSuccessArg) error {
+func (u *TestProvisionUI) ProvisioneeSuccess(_ context.Context, _ keybase1.ProvisioneeSuccessArg) error {
 	return nil
 }
 
-func (u *testProvisionUI) ProvisionerSuccess(_ context.Context, _ keybase1.ProvisionerSuccessArg) error {
+func (u *TestProvisionUI) ProvisionerSuccess(_ context.Context, _ keybase1.ProvisionerSuccessArg) error {
 	return nil
 }
 
@@ -209,8 +223,8 @@ func (n *TeamNotifyListener) TeamChangedByName(teamName string, latestSeqno keyb
 
 func NewTeamNotifyListener() *TeamNotifyListener {
 	return &TeamNotifyListener{
-		changeByIDCh:   make(chan keybase1.TeamChangedByIDArg, 1),
-		changeByNameCh: make(chan keybase1.TeamChangedByNameArg, 1),
+		changeByIDCh:   make(chan keybase1.TeamChangedByIDArg, 10),
+		changeByNameCh: make(chan keybase1.TeamChangedByNameArg, 10),
 	}
 }
 

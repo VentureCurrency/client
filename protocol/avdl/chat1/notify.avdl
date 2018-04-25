@@ -48,6 +48,7 @@ protocol NotifyChat {
 
   record FailedMessageInfo {
     array<OutboxRecord> outboxRecords;
+    boolean isEphemeralPurge;
   }
 
   record MembersUpdateInfo {
@@ -65,7 +66,6 @@ protocol NotifyChat {
   record ExpungeInfo {
     ConversationID convID;
     Expunge expunge;
-    union { null, InboxUIItem } conv;
   }
 
   variant ChatActivity switch (ChatActivityType activityType) {

@@ -107,7 +107,9 @@ func TestSyncerConnected(t *testing.T) {
 	convs = append(convs, newConv(ctx, t, tc, uid, ri, sender, u.Username+","+u1.Username))
 	convs = append(convs, newConv(ctx, t, tc, uid, ri, sender, u.Username+","+u2.Username))
 	convs = append(convs, newConv(ctx, t, tc, uid, ri, sender, u.Username+","+u2.Username+","+u1.Username))
-
+	for index, conv := range convs {
+		t.Logf("index: %d conv: %s", index, conv.GetConvID())
+	}
 	t.Logf("test current")
 	ri.SyncInboxFunc = func(m *kbtest.ChatRemoteMock, ctx context.Context, vers chat1.InboxVers) (chat1.SyncInboxRes, error) {
 		return chat1.NewSyncInboxResWithCurrent(), nil
@@ -148,6 +150,16 @@ func TestSyncerConnected(t *testing.T) {
 	_, iconvs, err := ibox.ReadAll(ctx)
 	require.NoError(t, err)
 	require.Equal(t, len(convs), len(iconvs))
+	// background loader will pick up all the convs from the read above
+	for i := 0; i < len(convs); i++ {
+		select {
+		case convID := <-list.bgConvLoads:
+			require.Equal(t, convs[i].GetConvID(), convID)
+		case <-time.After(20 * time.Second):
+			require.Fail(t, "no background conv loaded")
+		}
+	}
+
 	ri.SyncInboxFunc = func(m *kbtest.ChatRemoteMock, ctx context.Context, vers chat1.InboxVers) (chat1.SyncInboxRes, error) {
 		mconv.Metadata.Status = chat1.ConversationStatus_MUTED
 		return chat1.NewSyncInboxResWithIncremental(chat1.SyncIncrementalRes{
@@ -496,5 +508,146 @@ func TestSyncerRetentionExpunge(t *testing.T) {
 		t.Logf("message %v", i)
 		require.True(t, m.IsValid())
 		require.True(t, m.Valid().MessageBody.IsNil(), "remaining messages should have no body")
+	}
+}
+
+func TestSyncerTeamFilter(t *testing.T) {
+	ctx, world, ri2, _, sender, list := setupTest(t, 2)
+	defer world.Cleanup()
+
+	ri := ri2.(*kbtest.ChatRemoteMock)
+	u := world.GetUsers()[0]
+	u2 := world.GetUsers()[0]
+	uid := u.User.GetUID().ToBytes()
+	tc := world.Tcs[u.Username]
+	syncer := NewSyncer(tc.Context())
+	syncer.isConnected = true
+	ibox := storage.NewInbox(tc.Context(), uid)
+
+	iconv := newConv(ctx, t, tc, uid, ri, sender, u.Username)
+	tconv := newBlankConvWithMembersType(ctx, t, tc, uid, ri, sender, u.Username+","+u2.Username,
+		chat1.ConversationMembersType_TEAM)
+
+	_, _, err := tc.ChatG.InboxSource.Read(ctx, uid, nil, true, nil, nil)
+	require.NoError(t, err)
+	_, iconvs, err := ibox.ReadAll(ctx)
+	require.NoError(t, err)
+	require.Len(t, iconvs, 2)
+	require.NoError(t, ibox.TeamTypeChanged(ctx, 1, tconv.GetConvID(), chat1.TeamType_COMPLEX, nil))
+	tconv.Metadata.TeamType = chat1.TeamType_COMPLEX
+
+	t.Logf("dont sync shallow team change")
+	ri.SyncInboxFunc = func(m *kbtest.ChatRemoteMock, ctx context.Context, vers chat1.InboxVers) (chat1.SyncInboxRes, error) {
+		return chat1.NewSyncInboxResWithIncremental(chat1.SyncIncrementalRes{
+			Vers:  100,
+			Convs: []chat1.Conversation{iconv, tconv},
+		}), nil
+	}
+	doSync(t, syncer, ri, uid)
+	select {
+	case res := <-list.inboxSynced:
+		typ, err := res.SyncType()
+		require.NoError(t, err)
+		require.Equal(t, chat1.SyncInboxResType_INCREMENTAL, typ)
+		require.Equal(t, 1, len(res.Incremental().Items))
+		require.Equal(t, iconv.GetConvID().String(), res.Incremental().Items[0].ConvID)
+	case <-time.After(20 * time.Second):
+		require.Fail(t, "no sync")
+	}
+
+	t.Logf("sync it if metadata changed")
+	tconv.MaxMsgSummaries = append(tconv.MaxMsgSummaries, chat1.MessageSummary{
+		MsgID:       10,
+		MessageType: chat1.MessageType_METADATA,
+	})
+	doSync(t, syncer, ri, uid)
+	select {
+	case res := <-list.inboxSynced:
+		typ, err := res.SyncType()
+		require.NoError(t, err)
+		require.Equal(t, chat1.SyncInboxResType_INCREMENTAL, typ)
+		require.Equal(t, 2, len(res.Incremental().Items))
+	case <-time.After(20 * time.Second):
+		require.Fail(t, "no sync")
+	}
+}
+
+func TestSyncerBackgroundLoader(t *testing.T) {
+	ctx, world, ri2, _, sender, list := setupTest(t, 2)
+	defer world.Cleanup()
+
+	ri := ri2.(*kbtest.ChatRemoteMock)
+	u := world.GetUsers()[0]
+	uid := u.User.GetUID().ToBytes()
+	tc := world.Tcs[u.Username]
+	syncer := NewSyncer(tc.Context())
+	syncer.isConnected = true
+	hcs := tc.Context().ConvSource.(*HybridConversationSource)
+	if hcs == nil {
+		t.Skip()
+	}
+
+	conv := newConv(ctx, t, tc, uid, ri, sender, u.Username)
+	select {
+	case <-list.bgConvLoads:
+	case <-time.After(20 * time.Second):
+		require.Fail(t, "no conv load on sync")
+	}
+	ri.SyncInboxFunc = func(m *kbtest.ChatRemoteMock, ctx context.Context, vers chat1.InboxVers) (chat1.SyncInboxRes, error) {
+		return chat1.NewSyncInboxResWithIncremental(chat1.SyncIncrementalRes{
+			Vers:  100,
+			Convs: []chat1.Conversation{conv},
+		}), nil
+	}
+	doSync(t, syncer, ri, uid)
+	select {
+	case <-list.bgConvLoads:
+	case <-time.After(20 * time.Second):
+		require.Fail(t, "no conv load on sync")
+	}
+	time.Sleep(400 * time.Millisecond)
+	select {
+	case <-list.bgConvLoads:
+		require.Fail(t, "no conv load here")
+	default:
+	}
+
+	_, delMsg, _, err := sender.Send(ctx, conv.GetConvID(), chat1.MessagePlaintext{
+		ClientHeader: chat1.MessageClientHeader{
+			Conv:        conv.Metadata.IdTriple,
+			Sender:      u.User.GetUID().ToBytes(),
+			TlfName:     u.Username,
+			MessageType: chat1.MessageType_DELETE,
+			Supersedes:  2,
+		},
+		MessageBody: chat1.NewMessageBodyWithDelete(chat1.MessageDelete{
+			MessageIDs: []chat1.MessageID{2},
+		}),
+	}, 0, nil)
+	require.NoError(t, err)
+	require.NotNil(t, delMsg)
+	require.NoError(t, hcs.storage.MaybeNuke(context.TODO(), true, nil, conv.GetConvID(), uid))
+	ri.SyncInboxFunc = func(m *kbtest.ChatRemoteMock, ctx context.Context, vers chat1.InboxVers) (chat1.SyncInboxRes, error) {
+		conv.MaxMsgs = append(conv.MaxMsgs, *delMsg)
+		conv.MaxMsgSummaries = append(conv.MaxMsgSummaries, delMsg.Summary())
+		return chat1.NewSyncInboxResWithIncremental(chat1.SyncIncrementalRes{
+			Vers:  200,
+			Convs: []chat1.Conversation{conv},
+		}), nil
+	}
+	doSync(t, syncer, ri, uid)
+	// Pick up two conv loader runs for the expunge and the normal load
+	for i := 0; i < 2; i++ {
+		select {
+		case <-list.bgConvLoads:
+		case <-time.After(2 * time.Second):
+			require.Fail(t, "no conv load on sync")
+		}
+	}
+	time.Sleep(400 * time.Millisecond)
+	select {
+	case <-list.bgConvLoads:
+		require.Fail(t, "no conv load here")
+	default:
 	}
 }

@@ -1,6 +1,7 @@
 package io.keybase.ossifrage;
 
 import android.annotation.TargetApi;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.os.Build;
@@ -68,12 +69,20 @@ public class MainActivity extends ReactActivity {
 
         super.onCreate(savedInstanceState);
 
-        if (getIntent().getExtras().containsKey("notification")) {
-            ReactContext currentContext = getReactInstanceManager().getCurrentReactContext();
-            if (currentContext != null) {
-                currentContext
-                        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-                        .emit("androidIntentNotification", "");
+        Intent intent = getIntent();
+        if (intent != null) {
+            Bundle bundle = intent.getExtras();
+            if (bundle != null && bundle.containsKey("notification")) {
+                ReactInstanceManager instanceManager = getReactInstanceManager();
+                if (instanceManager != null) {
+                    ReactContext currentContext = instanceManager.getCurrentReactContext();
+                    if (currentContext != null) {
+                        DeviceEventManagerModule.RCTDeviceEventEmitter emitter = currentContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
+                        if (emitter != null) {
+                            emitter.emit("androidIntentNotification", "");
+                        }
+                    }
+                }
             }
         }
 
@@ -113,6 +122,24 @@ public class MainActivity extends ReactActivity {
             ContactsPermissionsWrapper.callbackWrapper(requestCode, permissions, grantResults);
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    @Override
+    protected void onPause() {
+        Keybase.setAppStateBackground();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        Keybase.setAppStateForeground();
+        super.onResume();
+    }
+
+    @Override
+    protected void onDestroy() {
+        Keybase.appWillExit();
+        super.onDestroy();
     }
 
     /**

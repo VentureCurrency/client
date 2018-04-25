@@ -1,9 +1,11 @@
 // @flow
 import React from 'react'
 import * as Types from '../constants/types/fs'
+import * as Constants from '../constants/fs'
 import {action, storiesOf, createPropProvider} from '../stories/storybook'
 import {globalColors} from '../styles'
 import Files from '.'
+import FilePreview from './filepreview'
 
 const provider = createPropProvider({
   FileRow: ({path}: {path: Types.Path}) => ({
@@ -33,6 +35,8 @@ const provider = createPropProvider({
     ],
     dropdownItems: [],
     isTeamPath: false,
+    path: Types.stringToPath('/keybase'),
+    onBack: action('onBack'),
     onOpenBreadcrumb: action('onOpenBreadcrumb'),
     onOpenBreadcrumbDropdown: action('onOpenBreadcrumbDropdown'),
   }),
@@ -43,6 +47,17 @@ const provider = createPropProvider({
     },
     onOpenSortSettingPopup: () => {},
     folderIsPending: true,
+  }),
+  FilesBanner: () => ({
+    path: Types.stringToPath('/keybase'),
+    kbfsEnabled: true,
+    showBanner: false,
+    inProgress: false,
+    showSecurityPrefs: false,
+    getFuseStatus: action('getFuseStatus'),
+    onDismiss: action('onDismiss'),
+    onInstall: action('onInstall'),
+    onUninstall: action('onUninstall'),
   }),
 })
 
@@ -58,6 +73,23 @@ const load = () => {
           Types.stringToPath('/keybase/public'),
           Types.stringToPath('/keybase/team'),
         ]}
+      />
+    ))
+    .add('Preview', () => (
+      <FilePreview
+        fileUIEnabled={false}
+        pathItem={Constants.makeFile({
+          name: 'bar.jpg',
+          size: 10240,
+          lastWriter: {uid: '', username: 'foo'},
+        })}
+        itemStyles={Constants.getItemStyles(['keybase', 'private', 'foo', 'bar.jpg'], 'file', 'foo')}
+        onAction={() => {}}
+        onBack={() => {}}
+        onDownload={() => {}}
+        onShowInFileUI={() => {}}
+        onShare={() => {}}
+        onSave={() => {}}
       />
     ))
 }

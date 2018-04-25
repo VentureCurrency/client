@@ -2,14 +2,17 @@
 import * as React from 'react'
 import {globalStyles, globalMargins, globalColors, isMobile, platformStyles} from '../../styles'
 import {Box, Button, Text, Checkbox} from '../../common-adapters'
+import {isLinux} from '../../constants/platform'
 
 type Props = {
   openAtLogin: boolean,
   onSetOpenAtLogin: (open: boolean) => void,
   onDBNuke: () => void,
   onTrace: (durationSeconds: number) => void,
+  onProcessorProfile: (durationSeconds: number) => void,
   onBack: () => void,
   traceInProgress: boolean,
+  processorProfileInProgress: boolean,
 }
 
 const Advanced = (props: Props) => (
@@ -20,55 +23,49 @@ const Advanced = (props: Props) => (
       padding: globalMargins.medium,
     }}
   >
-    {!isMobile && (
-      <Box
-        style={{
-          ...globalStyles.flexBoxColumn,
-          alignItems: 'left',
-          flex: 1,
-        }}
-      >
-        <Checkbox
-          label="Open Keybase on startup"
-          checked={props.openAtLogin}
-          onCheck={props.onSetOpenAtLogin}
-        />
-      </Box>
-    )}
+    {!isMobile &&
+      !isLinux && (
+        <Box
+          style={{
+            ...globalStyles.flexBoxColumn,
+            alignItems: 'left',
+            flex: 1,
+          }}
+        >
+          <Checkbox
+            label="Open Keybase on startup"
+            checked={props.openAtLogin}
+            onCheck={props.onSetOpenAtLogin}
+          />
+        </Box>
+      )}
     <Developer {...props} />
   </Box>
 )
 
-type TraceButtonProps = {
-  durationSeconds: number,
-  traceInProgress: boolean,
-  onTrace: (durationSeconds: number) => void,
+type StartButtonProps = {
+  label: string,
+  inProgress: boolean,
+  onStart: () => void,
 }
 
-class TraceButton extends React.Component<TraceButtonProps> {
-  _onClick = () => {
-    this.props.onTrace(this.props.durationSeconds)
-  }
-
-  render() {
-    const label = `Trace (${this.props.durationSeconds}s)`
-    return (
-      <Button
-        waiting={this.props.traceInProgress}
-        style={{marginTop: globalMargins.small}}
-        type="Danger"
-        label={label}
-        onClick={this._onClick}
-      />
-    )
-  }
-}
+const StartButton = (props: StartButtonProps) => (
+  <Button
+    waiting={props.inProgress}
+    style={{marginTop: globalMargins.small}}
+    type="Danger"
+    label={props.label}
+    onClick={props.onStart}
+  />
+)
 
 type DeveloperState = {
   clickCount: number,
 }
 
 const clickThreshold = 7
+const traceDurationSeconds = 30
+const processorProfileDurationSeconds = 30
 
 class Developer extends React.Component<Props, DeveloperState> {
   constructor(props: Props) {
@@ -91,7 +88,7 @@ class Developer extends React.Component<Props, DeveloperState> {
     })
   }
 
-  _showTrace = () => {
+  _showPprofControls = () => {
     return this.state.clickCount >= clickThreshold
   }
 
@@ -130,13 +127,22 @@ class Developer extends React.Component<Props, DeveloperState> {
           label="DB Nuke"
           onClick={props.onDBNuke}
         />
-        {this._showTrace() && (
-          <TraceButton durationSeconds={30} onTrace={props.onTrace} traceInProgress={props.traceInProgress} />
-        )}
-        {this._showTrace() && (
-          <Text type="BodySmallSemibold" style={{textAlign: 'center'}}>
-            Trace files are included in logs sent with feedback.
-          </Text>
+        {this._showPprofControls() && (
+          <React.Fragment>
+            <StartButton
+              label={`Trace (${traceDurationSeconds}s)`}
+              onStart={() => props.onTrace(traceDurationSeconds)}
+              inProgress={props.traceInProgress}
+            />
+            <StartButton
+              label={`CPU Profile (${traceDurationSeconds}s)`}
+              onStart={() => props.onProcessorProfile(processorProfileDurationSeconds)}
+              inProgress={props.processorProfileInProgress}
+            />
+            <Text type="BodySmallSemibold" style={{textAlign: 'center'}}>
+              Trace and profile files are included in logs sent with feedback.
+            </Text>
+          </React.Fragment>
         )}
         <Box style={{flex: 1}} />
       </Box>

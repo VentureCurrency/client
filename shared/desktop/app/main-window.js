@@ -11,25 +11,6 @@ import {resolveRootAsURL} from '../resolve-root'
 import {windowStyle} from '../../styles'
 import {isWindows} from '../../constants/platform'
 
-const scripts = [
-  ...(__DEV__
-    ? [
-        {
-          async: false,
-          src: resolveRootAsURL('dist', 'dll/dll.vendor.js'),
-        },
-        {
-          async: false,
-          src: hotPath('common-chunks.js'),
-        },
-      ]
-    : []),
-  {
-    async: false,
-    src: hotPath('index.bundle.js'),
-  },
-]
-
 export default function() {
   let appState = new AppState()
   appState.checkOpenAtLogin()
@@ -37,6 +18,7 @@ export default function() {
   const mainWindow = new Window(
     resolveRootAsURL('renderer', injectReactQueryParams('renderer.html?mainWindow')),
     {
+      backgroundThrottling: false,
       height: appState.state.height,
       minHeight: windowStyle.minHeight,
       minWidth: windowStyle.minWidth,
@@ -49,7 +31,14 @@ export default function() {
 
   const webContents = mainWindow.window.webContents
   webContents.on('did-finish-load', () => {
-    webContents.send('load', {scripts})
+    webContents.send('load', {
+      scripts: [
+        {
+          async: false,
+          src: hotPath('index.bundle.js'),
+        },
+      ],
+    })
   })
 
   if (showDevTools) {
@@ -59,7 +48,7 @@ export default function() {
   appState.manageWindow(mainWindow.window)
 
   const openedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin
-  // app.getLoginItemSettings().restoreState is mac only, so consider it always on in Windows
+  // app.getLoginItemSettings().restoreState is Mac only, so consider it always on in Windows
   const isRestore =
     getenv.boolish('KEYBASE_RESTORE_UI', false) || app.getLoginItemSettings().restoreState || isWindows
   const hideWindowOnStart = getenv.string('KEYBASE_START_UI', '') === 'hideWindow'

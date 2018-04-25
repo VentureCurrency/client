@@ -46,7 +46,7 @@ func TestFetchRetry(t *testing.T) {
 	}
 
 	// Nuke body cache
-	require.NoError(t, store.MaybeNuke(true, nil, convs[0].GetConvID(), uid))
+	require.NoError(t, store.MaybeNuke(context.TODO(), true, nil, convs[0].GetConvID(), uid))
 
 	errorRI := func() chat1.RemoteInterface { return chat1.RemoteClient{Cli: errorClient{}} }
 	tc.ChatG.ConvSource.SetRemoteInterface(errorRI)
@@ -67,7 +67,7 @@ func TestFetchRetry(t *testing.T) {
 	select {
 	case updates := <-list.threadsStale:
 		require.Equal(t, 1, len(updates))
-		require.Equal(t, chat1.StaleUpdateType_NEWACTIVITY, updates[0].UpdateType)
+		require.Equal(t, chat1.StaleUpdateType_CLEAR, updates[0].UpdateType)
 	case <-time.After(20 * time.Second):
 		require.Fail(t, "timeout on inbox stale")
 	}

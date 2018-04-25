@@ -8,8 +8,7 @@ import * as Types from './types/engine'
 import * as SagaTypes from './types/saga'
 import type {Channel} from 'redux-saga'
 import {getEngine, EngineChannel} from '../engine'
-import mapValues from 'lodash/mapValues'
-import {RPCTimeoutError} from '../util/errors'
+import {mapValues} from 'lodash-es'
 
 // If a sub saga returns bail early, then the rpc will bail early
 const BailedEarly = {type: '@@engineRPCCall:bailedEarly', payload: undefined}
@@ -98,6 +97,7 @@ class EngineRpcCall {
     this._rpc = rpc
     this._cleanedUp = false
     this._request = request
+    this._finishedErrorShouldCancel = finishedErrorShouldCancel || false
     this._subSagaChannel = Saga.channel(Saga.buffers.expanding(10))
     this._waitingActionCreator = waitingActionCreator
     // $FlowIssue with this
@@ -168,11 +168,13 @@ class EngineRpcCall {
 
         if (incoming.timeout) {
           yield Saga.call([this, this._cleanup], subSagaTasks)
-          throw new RPCTimeoutError(this._rpcNameKey, timeout)
+          throw new Error(
+            `RPC timeout error on ${this._rpcNameKey}. Had a ttl of: ${timeout || 'Undefined timeout'}`
+          )
         }
 
         if (incoming.finished) {
-          // Used just by device add for now. this is to fix a bug and i'm not sure this should apply generally
+          // Used just by device add for now. This is to fix a bug and I'm not sure this should apply generally
           if (incoming.finished.error && this._finishedErrorShouldCancel) {
             yield Saga.call([this, this._cleanup], subSagaTasks)
             const {error, params} = incoming.finished

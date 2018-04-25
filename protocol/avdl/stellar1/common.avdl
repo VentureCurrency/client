@@ -1,0 +1,66 @@
+@namespace("stellar.1")
+protocol common {
+  import idl "github.com/keybase/client/go/protocol/keybase1" as keybase1;
+
+  @typedef("string") record AccountID {}
+  @typedef("string") record SecretKey {}
+  @typedef("string") record TransactionID {}
+  @typedef("string") record KeybaseTransactionID {}
+  @typedef("long")   record TimeMs {} // ms since epoch
+  @typedef("bytes")  record Hash {}
+
+  record Asset {
+    string type;
+    string code;
+    string issuer;
+  }
+
+  record Balance {
+    Asset asset;
+    string amount;
+    string limit;
+  }
+
+  enum TransactionStatus {
+    NONE_0,
+    PENDING_1,
+    SUCCESS_2,
+    ERROR_TRANSIENT_3,
+    ERROR_PERMANENT_4
+  }
+
+  record PaymentResult {
+    TransactionID stellarID;
+    KeybaseTransactionID keybaseID;
+    int Ledger;
+  }
+
+  // A note encrypted for one or two keybase users.
+  // Decrypts to a NoteContents.
+  record EncryptedNote {
+    int v;               // version
+    bytes e;             // encrypted data
+    keybase1.BoxNonce n; // nonce
+    NoteRecipient sender;
+    union { null, NoteRecipient } recipient;
+  }
+
+  record NoteRecipient {
+    keybase1.UserVersion user;
+    keybase1.PerUserKeyGeneration pukGen;
+  }
+
+  record NoteContents {
+    int version;
+    string note;
+    TransactionID stellarID;
+  }
+
+  @typedef("string") record OutsideCurrencyCode {}
+
+  record OutsideExchangeRate {
+    OutsideCurrencyCode currency; // Example: PLN
+    string rate; // Example: "0.9389014463" = PLN / XLM
+  }
+
+}

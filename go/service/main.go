@@ -17,8 +17,10 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/keybase/cli"
+	"github.com/keybase/client/go/avatars"
 	"github.com/keybase/client/go/badges"
 	"github.com/keybase/client/go/chat"
+	"github.com/keybase/client/go/chat/attachments"
 	"github.com/keybase/client/go/chat/globals"
 	"github.com/keybase/client/go/chat/storage"
 	"github.com/keybase/client/go/engine"
@@ -30,7 +32,9 @@ import (
 	"github.com/keybase/client/go/protocol/chat1"
 	gregor1 "github.com/keybase/client/go/protocol/gregor1"
 	"github.com/keybase/client/go/protocol/keybase1"
+	"github.com/keybase/client/go/protocol/stellar1"
 	"github.com/keybase/client/go/pvlsource"
+	"github.com/keybase/client/go/stellar"
 	"github.com/keybase/client/go/systemd"
 	"github.com/keybase/client/go/teams"
 	"github.com/keybase/client/go/tlfupgrade"
@@ -50,12 +54,13 @@ type Service struct {
 	logForwarder         *logFwd
 	gregor               *gregorHandler
 	rekeyMaster          *rekeyMaster
-	attachmentstore      *chat.AttachmentStore
+	attachmentstore      *attachments.Store
 	badger               *badges.Badger
 	reachability         *reachability
 	backgroundIdentifier *BackgroundIdentifier
 	home                 *home.Home
 	tlfUpgrader          *tlfupgrade.BackgroundTLFUpdater
+	avatarLoader         avatars.Source
 }
 
 type Shutdowner interface {
@@ -73,11 +78,12 @@ func NewService(g *libkb.GlobalContext, isDaemon bool) *Service {
 		stopCh:           make(chan keybase1.ExitCode),
 		logForwarder:     newLogFwd(),
 		rekeyMaster:      newRekeyMaster(g),
-		attachmentstore:  chat.NewAttachmentStore(g.GetLog(), g.Env.GetRuntimeDir()),
+		attachmentstore:  attachments.NewStore(g.GetLog(), g.Env.GetRuntimeDir()),
 		badger:           badges.NewBadger(g),
 		gregor:           newGregorHandler(allG),
 		home:             home.NewHome(g),
 		tlfUpgrader:      tlfupgrade.NewBackgroundTLFUpdater(g),
+		avatarLoader:     avatars.CreateSourceFromEnv(g),
 	}
 }
 
@@ -135,6 +141,8 @@ func (d *Service) RegisterProtocols(srv *rpc.Server, xp rpc.Transporter, connID 
 		keybase1.MerkleProtocol(newMerkleHandler(xp, g)),
 		keybase1.GitProtocol(NewGitHandler(xp, g)),
 		keybase1.HomeProtocol(NewHomeHandler(xp, g, d.home)),
+		keybase1.AvatarsProtocol(NewAvatarHandler(xp, g, d.avatarLoader)),
+		stellar1.LocalProtocol(newWalletHandler(xp, g)),
 	}
 	for _, proto := range protocols {
 		if err = srv.Register(proto); err != nil {
@@ -287,6 +295,7 @@ func (d *Service) Run() (err error) {
 func (d *Service) SetupCriticalSubServices() error {
 	epick := libkb.FirstErrorPicker{}
 	epick.Push(d.setupTeams())
+	epick.Push(d.setupStellar())
 	epick.Push(d.setupPVL())
 	epick.Push(d.setupEphemeralKeys())
 	return epick.Error()
@@ -302,6 +311,11 @@ func (d *Service) setupTeams() error {
 	return nil
 }
 
+func (d *Service) setupStellar() error {
+	stellar.ServiceInit(d.G())
+	return nil
+}
+
 func (d *Service) setupPVL() error {
 	pvlsource.NewPvlSourceAndInstall(d.G())
 	return nil
@@ -313,16 +327,19 @@ func (d *Service) RunBackgroundOperations(uir *UIRouter) {
 	// backgrounded.
 	d.tryLogin()
 	d.hourlyChecks()
-	d.slowChecks()
+	d.slowChecks() // 6 hours
 	d.createChatModules()
 	d.startupGregor()
 	d.startChatModules()
+	d.chatEphemeralPurgeChecks()
 	d.addGlobalHooks()
 	d.configurePath()
 	d.configureRekey(uir)
 	d.runBackgroundIdentifier()
 	d.runBackgroundPerUserKeyUpgrade()
 	d.runBackgroundPerUserKeyUpkeep()
+	d.runBackgroundWalletInit()
+	d.runBackgroundWalletUpkeep()
 	d.runTLFUpgrade()
 	go d.identifySelf()
 }
@@ -350,9 +367,10 @@ func (d *Service) createChatModules() {
 
 	// Set up main chat data sources
 	boxer := chat.NewBoxer(g)
+	chatStorage := storage.New(g)
 	g.InboxSource = chat.NewInboxSource(g, g.Env.GetInboxSourceType(), ri)
 	g.ConvSource = chat.NewConversationSource(g, g.Env.GetConvSourceType(),
-		boxer, storage.New(g), ri)
+		boxer, chatStorage, ri)
 	g.Searcher = chat.NewSearcher(g)
 	g.ServerCacheVersions = storage.NewServerVersions(g)
 
@@ -374,6 +392,9 @@ func (d *Service) createChatModules() {
 
 	// team channel source
 	g.TeamChannelSource = chat.NewCachingTeamChannelSource(g, ri)
+
+	g.AttachmentURLSrv = chat.NewAttachmentHTTPSrv(g,
+		chat.NewCachingAttachmentFetcher(g, d.attachmentstore, 1000), ri)
 
 	// Set up Offlinables on Syncer
 	chatSyncer.RegisterOfflinable(g.InboxSource)
@@ -480,6 +501,7 @@ func (d *Service) startupGregor() {
 
 		d.gregor.PushHandler(newTeamHandler(d.G(), d.badger))
 		d.gregor.PushHandler(d.home)
+		d.gregor.PushHandler(newEKHandler(d.G()))
 
 		// Connect to gregord
 		if gcErr := d.tryGregordConnect(); gcErr != nil {
@@ -533,6 +555,32 @@ func (d *Service) writeServiceInfo() error {
 	return rtInfo.WriteFile(d.G().Env.GetServiceInfoPath(), d.G().Log)
 }
 
+func (d *Service) chatEphemeralPurgeChecks() {
+	ticker := time.NewTicker(5 * time.Minute)
+	d.G().PushShutdownHook(func() error {
+		d.G().Log.Debug("stopping chatEphemeralPurgeChecks loop")
+		ticker.Stop()
+		return nil
+	})
+	go func() {
+		for {
+			<-ticker.C
+			uid := d.G().Env.GetUID()
+			if uid.IsNil() {
+				continue
+			}
+			gregorUID := gregor1.UID(uid.ToBytes())
+			d.G().Log.Debug("+ chat ephemeral purge loop")
+			g := globals.NewContext(d.G(), d.ChatG())
+			// Purge any conversations that have expired ephemeral messages
+			storage.New(g).QueueEphemeralBackgroundPurges(context.Background(), gregorUID)
+			// Check the outbox for stuck ephemeral messages that need purging
+			storage.NewOutbox(g, gregorUID).EphemeralPurge(context.Background())
+			d.G().Log.Debug("- chat ephemeral chat loop")
+		}
+	}()
+}
+
 func (d *Service) hourlyChecks() {
 	ticker := time.NewTicker(1 * time.Hour)
 	d.G().PushShutdownHook(func() error {
@@ -545,11 +593,17 @@ func (d *Service) hourlyChecks() {
 		if err := d.G().LogoutIfRevoked(); err != nil {
 			d.G().Log.Debug("LogoutIfRevoked error: %s", err)
 		}
+		ekLib := d.G().GetEKLib()
+		ekLib.KeygenIfNeeded(context.Background())
 		for {
 			<-ticker.C
 			d.G().Log.Debug("+ hourly check loop")
 			d.G().Log.Debug("| checking tracks on an hour timer")
 			libkb.CheckTracking(d.G())
+
+			ekLib := d.G().GetEKLib()
+			d.G().Log.Debug("| checking if ephemeral keys need to be created or deleted")
+			ekLib.KeygenIfNeeded(context.Background())
 			d.G().Log.Debug("| checking if current device revoked")
 			if err := d.G().LogoutIfRevoked(); err != nil {
 				d.G().Log.Debug("LogoutIfRevoked error: %s", err)
@@ -585,11 +639,11 @@ func (d *Service) tryGregordConnect() error {
 	// is down, it will still return false, along with the network error. We
 	// need to handle that case specifically, so that we still start the gregor
 	// connect loop.
-	loggedIn, err := d.G().LoginState().LoggedInProvisioned()
+	loggedIn, err := d.G().LoginState().LoggedInProvisioned(context.Background())
 	if err != nil {
 		// A network error means we *think* we're logged in, and we tried to
 		// confirm with the API server. In that case we'll swallow the error
-		// and allow control to proceeed to the gregor loop. We'll still
+		// and allow control to proceed to the gregor loop. We'll still
 		// short-circuit for any unexpected errors though.
 		switch err.(type) {
 		case libkb.LoginStateTimeoutError, libkb.APINetError:
@@ -660,6 +714,40 @@ func (d *Service) runBackgroundPerUserKeyUpkeep() {
 
 	d.G().PushShutdownHook(func() error {
 		d.G().Log.Debug("stopping per-user-key background upkeep")
+		eng.Shutdown()
+		return nil
+	})
+}
+
+func (d *Service) runBackgroundWalletInit() {
+	eng := engine.NewWalletInitBackground(d.G(), &engine.WalletInitBackgroundArgs{})
+	go func() {
+		ectx := &engine.Context{NetContext: context.Background()}
+		err := engine.RunEngine(eng, ectx)
+		if err != nil {
+			d.G().Log.Warning("background WalletInit error: %v", err)
+		}
+	}()
+
+	d.G().PushShutdownHook(func() error {
+		d.G().Log.Debug("stopping background WalletInit")
+		eng.Shutdown()
+		return nil
+	})
+}
+
+func (d *Service) runBackgroundWalletUpkeep() {
+	eng := engine.NewWalletUpkeepBackground(d.G(), &engine.WalletUpkeepBackgroundArgs{})
+	go func() {
+		ectx := &engine.Context{NetContext: context.Background()}
+		err := engine.RunEngine(eng, ectx)
+		if err != nil {
+			d.G().Log.Warning("background WalletUpkeep error: %v", err)
+		}
+	}()
+
+	d.G().PushShutdownHook(func() error {
+		d.G().Log.Debug("stopping background WalletUpkeep")
 		eng.Shutdown()
 		return nil
 	})

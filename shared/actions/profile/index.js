@@ -12,7 +12,7 @@ import URL from 'url-parse'
 import keybaseUrl from '../../constants/urls'
 import openURL from '../../util/open-url'
 import {getPathProps} from '../../route-tree'
-import {loginRouteTree} from '../../app/routes'
+import loginRouteTree from '../../app/routes-login'
 import {navigateTo, navigateUp, switchRouteDef} from '../../actions/route-tree'
 import {loginTab, peopleTab} from '../../constants/tabs'
 import {pgpSaga} from './pgp'
@@ -52,12 +52,12 @@ function _showUserProfile(action: ProfileGen.ShowUserProfilePayload, state: Type
   return Saga.put(navigateTo(onlyProfilesPath))
 }
 
-function _onClickAvatar(action: ProfileGen.OnClickFollowersPayload) {
+function _onClickAvatar(action: ProfileGen.OnClickAvatarPayload) {
   if (!action.payload.username) {
     return
   }
 
-  if (!action.openWebsite) {
+  if (!action.payload.openWebsite) {
     return Saga.put(ProfileGen.createShowUserProfile({username: action.payload.username}))
   } else {
     return Saga.call(openURL, `${keybaseUrl}/${action.payload.username}`)
@@ -71,7 +71,7 @@ function _openProfileOrWebsite(
     return
   }
 
-  if (!action.openWebsite) {
+  if (!action.payload.openWebsite) {
     return Saga.put(ProfileGen.createShowUserProfile({username: action.payload.username}))
   } else {
     return Saga.call(openURL, `${keybaseUrl}/${action.payload.username}#profile-tracking-section`)
@@ -97,7 +97,7 @@ function* _submitRevokeProof(action: ProfileGen.SubmitRevokeProofPayload): Saga.
 
 function _openURLIfNotNull(nullableThing, url, metaText): void {
   if (nullableThing == null) {
-    logger.warn("Can't openURL because we have a null", metaText)
+    logger.warn("Can't open URL because we have a null", metaText)
     return
   }
   openURL(url)

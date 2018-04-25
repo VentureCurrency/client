@@ -19,10 +19,10 @@ import {writeLogLinesToFile} from '../util/forward-logs'
 import {stat, unlink} from '../util/file'
 
 // Function to flatten arrays and preserve their sort order
-// Same as concating all the arrays and calling .sort() but could be faster
+// Same as concatenating all the arrays and calling .sort() but could be faster
 // sortFn behaves just like .sort()'s sortFn
 function _mergeSortedArraysHelper<A>(sortFn: (a: A, b: A) => number, ...arrays: Array<Array<A>>): Array<A> {
-  // TODO make a more effecient version - doing simple thing for now
+  // TODO make a more efficient version - doing simple thing for now
   return [].concat(...arrays).sort(sortFn)
 }
 
@@ -115,7 +115,7 @@ const devLoggers = () => ({
   action: new TeeLogger(new RingLogger(100), new ConsoleLogger('log', 'Dispatching Action')),
   debug: new ConsoleLogger('log', 'DEBUG:'),
   error: new ConsoleLogger('error'),
-  info: new ConsoleLogger('log'),
+  info: new TeeLogger(new RingLogger(10000), new ConsoleLogger('log')),
   warn: new ConsoleLogger('warn'),
 })
 
@@ -138,4 +138,11 @@ const prodLoggers = () => ({
 // Settings
 const logSetup = __DEV__ || __STORYBOOK__ ? devLoggers() : prodLoggers()
 
-export default new AggregateLoggerImpl(logSetup)
+const theOnlyLogger = new AggregateLoggerImpl(logSetup)
+
+if (!isMobile && typeof global !== 'undefined') {
+  // So we can easily grab this from the main renderer
+  global.globalLogger = theOnlyLogger
+}
+
+export default theOnlyLogger

@@ -1,6 +1,7 @@
 // @flow
 import * as I from 'immutable'
 import * as RPCTypes from './rpc-gen'
+import * as Devices from './devices'
 import {type IconType} from '../../common-adapters/icon'
 import {type TextType} from '../../common-adapters/text'
 import {isWindows} from '../platform'
@@ -8,19 +9,51 @@ import {isWindows} from '../platform'
 export opaque type Path = ?string
 
 export type PathType = 'folder' | 'file' | 'symlink' | 'unknown'
-export type ProgressType = 'pending' | 'loaded'
+export type ProgressType = 'favorite' | 'pending' | 'loaded'
+
+export type Device = {
+  type: Devices.DeviceType,
+  name: string,
+  deviceID: string,
+}
+
+export type ParticipantUnlock = {
+  name: string,
+  devices: string,
+}
+
+export type FavoriteMetadata = {
+  folderType: RPCTypes.FolderType,
+  isIgnored: boolean,
+  isNew: boolean,
+  needsRekey: boolean,
+  waitingForParticipantUnlock?: Array<ParticipantUnlock>,
+  youCanUnlock?: Array<Device>,
+}
+
+export type _FavoriteItem = {
+  badgeCount: number,
+  name: string,
+  tlfMeta?: FavoriteMetadata,
+  favoriteChildren?: I.Set<string>,
+}
+
+export type FavoriteItem = I.RecordOf<_FavoriteItem>
 
 export type PathItemMetadata = {
   name: string,
   lastModifiedTimestamp: number,
+  lastWriter: RPCTypes.User,
   size: number,
-  lastWriter: string,
   progress: ProgressType,
+  badgeCount: number,
+  tlfMeta?: FavoriteMetadata,
 }
 
 export type _FolderPathItem = {
   type: 'folder',
-  children: I.List<string>,
+  children: I.Set<string>,
+  favoriteChildren: I.Set<string>,
 } & PathItemMetadata
 export type FolderPathItem = I.RecordOf<_FolderPathItem>
 
@@ -58,36 +91,60 @@ export type PathUserSetting = I.RecordOf<_PathUserSetting>
 export type LocalPath = string
 
 export type TransferType = 'upload' | 'download'
+export type TransferIntent = 'none' | 'camera-roll' | 'share'
 
-export type _TransferState = {
+export type _TransferMeta = {
   type: TransferType,
   entryType: PathType,
+  intent: TransferIntent,
   path: Path,
   localPath: LocalPath,
+  opID: RPCTypes.OpID,
+}
+export type TransferMeta = I.RecordOf<_TransferMeta>
+
+export type _TransferState = {
   completePortion: number,
+  endEstimate?: number,
   error?: string,
   isDone: boolean,
   startedAt: number,
 }
 export type TransferState = I.RecordOf<_TransferState>
 
+export type _Transfer = {
+  meta: TransferMeta,
+  state: TransferState,
+}
+export type Transfer = I.RecordOf<_Transfer>
+
 export type PathBreadcrumbItem = {
   isTlfNameItem: boolean,
   isLastItem: boolean,
   name: string,
+  path: Path,
   onOpenBreadcrumb: (evt?: SyntheticEvent<>) => void,
 }
+
+export type _Flags = {
+  kbfsOpening: boolean,
+  kbfsInstalling: boolean,
+  fuseInstalling: boolean,
+  kextPermissionError: boolean,
+  securityPrefsPropmted: boolean,
+  showBanner: boolean,
+  syncing: boolean,
+}
+
+export type Flags = I.RecordOf<_Flags>
 
 export type _State = {
   pathItems: I.Map<Path, PathItem>,
   pathUserSettings: I.Map<Path, PathUserSetting>,
   loadingPaths: I.Set<Path>,
-  transfers: I.Map<string, TransferState>,
+  transfers: I.Map<string, Transfer>,
   fuseStatus: ?RPCTypes.FuseStatus,
-  kbfsOpening: boolean,
-  kbfsInstalling: boolean,
-  fuseInstalling: boolean,
-  kextPermissionError: boolean,
+  flags: Flags,
 }
 export type State = I.RecordOf<_State>
 
@@ -98,6 +155,13 @@ export const pathToString = (p: Path): string => (!p ? '' : p)
 // export const stringToLocalPath = (s: string): LocalPath => s
 // export const localPathToString = (p: LocalPath): string => p
 export const getPathName = (p: Path): string => (!p ? '' : p.split('/').pop())
+export const getPathParent = (p: Path): Path =>
+  !p
+    ? ''
+    : p
+        .split('/')
+        .slice(0, -1)
+        .join('/')
 export const getPathElements = (p: Path): Array<string> => (!p ? [] : p.split('/').slice(1))
 export const getVisibilityFromElems = (elems: Array<string>) => {
   if (elems.length < 2 || !elems[1]) return null
@@ -137,6 +201,7 @@ export const pathIsNonTeamTLFList = (p: Path): boolean => {
   const str = pathToString(p)
   return str === '/keybase/private' || str === '/keybase/public'
 }
+export const getPathDir = (p: Path): Path => pathToString(p).slice(0, pathToString(p).lastIndexOf('/'))
 
 const localSep = isWindows ? '\\' : '/'
 
@@ -145,20 +210,22 @@ export const getLocalPathName = (p: LocalPath): string => p.split(localSep).pop(
 export const getLocalPathDir = (p: LocalPath): string => p.slice(0, p.lastIndexOf(localSep))
 
 type PathItemComparer = (a: PathItem, b: PathItem) => number
+type PathItemLessThan = (a: PathItem, b: PathItem) => boolean
+
+const _comparerFromLessThan = (lt: PathItemLessThan): PathItemComparer => (a, b) =>
+  lt(a, b) ? -1 : lt(b, a) ? 1 : 0
 
 const _neutralComparer = (a: PathItem, b: PathItem): number => 0
 
-const _getMeFirstComparer = (meUsername: string): PathItemComparer => (a: PathItem, b: PathItem): number =>
-  a.name === meUsername ? -1 : b.name === meUsername ? 1 : 0
+const _getMeFirstComparer = (meUsername: string): PathItemComparer =>
+  _comparerFromLessThan((a: PathItem, b: PathItem): boolean => a.name === meUsername && b.name !== meUsername)
 
-const _folderFirstComparer: PathItemComparer = (a: PathItem, b: PathItem): number => {
-  if (a.type === 'folder' && b.type !== 'folder') {
-    return -1
-  } else if (a.type !== 'folder' && b.type === 'folder') {
-    return 1
-  }
-  return 0
-}
+const _folderFirstComparer: PathItemComparer = _comparerFromLessThan(
+  (a: PathItem, b: PathItem): boolean =>
+    a.type === 'folder'
+      ? b.type !== 'folder' || (!!a.tlfMeta && a.tlfMeta.isNew && !(b.tlfMeta && b.tlfMeta.isNew))
+      : false
+)
 
 export const _getSortByComparer = (sortBy: SortBy): PathItemComparer => {
   switch (sortBy) {
@@ -166,7 +233,7 @@ export const _getSortByComparer = (sortBy: SortBy): PathItemComparer => {
       return (a: PathItem, b: PathItem): number => a.name.localeCompare(b.name)
     case 'time':
       return (a: PathItem, b: PathItem): number =>
-        a.lastModifiedTimestamp - b.lastModifiedTimestamp || a.name.localeCompare(b.name)
+        b.lastModifiedTimestamp - a.lastModifiedTimestamp || a.name.localeCompare(b.name)
     default:
       throw new Error('invalid SortBy: ' + sortBy)
   }
@@ -237,4 +304,25 @@ export type ItemStyles = {
   iconSpec: PathItemIconSpec,
   textColor: string,
   textType: TextType,
+}
+
+export type FolderRPCWithMeta = {
+  name: string,
+  folderType: RPCTypes.FolderType,
+  isIgnored: boolean,
+  isNew: boolean,
+  needsRekey: boolean,
+  waitingForParticipantUnlock?: Array<ParticipantUnlock>,
+  youCanUnlock?: Array<Device>,
+}
+
+export type FavoriteFolder = {
+  name: string,
+  private: boolean,
+  folderType: RPCTypes.FolderType,
+  problem_set?: {
+    // Map of UID to a list of KIDs, for this folder
+    solution_kids: {[string]: Array<string>},
+    can_self_help: boolean,
+  },
 }

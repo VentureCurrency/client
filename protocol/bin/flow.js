@@ -161,7 +161,7 @@ function capitalize(s) {
 
 function analyzeMessages(json, project) {
   // ui means an incoming rpc. simple regexp to filter this but it might break in the future if
-  // the core side doesn't have a consisten naming convention. (must be case insensitive to pass correctly)
+  // the core side doesn't have a consistent naming convention. (must be case insensitive to pass correctly)
   const isUIProtocol =
     ['notifyCtl'].indexOf(json.protocol) === -1 &&
     !!json.protocol.match(/^(notify.*|.*ui|logsend)$/i) &&
@@ -358,9 +358,9 @@ import engine, {EngineChannel} from '../../engine'
 import type {Boolean, Bool, Bytes, Double, Int, Int64, Long, String, Uint, Uint64, WaitingHandlerType, RPCErrorHandler, CommonResponseHandler, RPCError} from '../../engine/types'
 `
   const incomingMap =
-    `\nexport type IncomingCallMapType = {` +
+    `\nexport type IncomingCallMapType = {|` +
     Object.keys(project.incomingMaps).map(im => `  '${im}'?: ${project.incomingMaps[im]}`).join(',') +
-    '}\n'
+    '|}\n'
   const toWrite = [typePrelude, typeDefs.join('\n'), incomingMap].join('\n')
   const destinationFile = `types/${project.out.substr(3)}` // Only used by prettier so we can set an override in .prettierrc
   const formatted = prettier.format(toWrite, prettier.resolveConfig.sync(destinationFile))

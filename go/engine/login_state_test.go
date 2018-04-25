@@ -16,64 +16,6 @@ import (
 // TODO: These tests should really be in libkb/. However, any test
 // that creates new users have to remain in engine/ for now. Fix this.
 
-// Test that LoginState and Session are in sync regarding whether a
-// user is logged in.
-func TestLoginLogout(t *testing.T) {
-	tc := SetupEngineTest(t, "login logout")
-	defer tc.Cleanup()
-
-	if err := AssertLoggedOut(tc); err != nil {
-		t.Error("Unexpectedly logged in (Session)")
-	}
-
-	if LoggedIn(tc) {
-		t.Error("Unexpectedly logged in (LoginState)")
-	}
-
-	// Logging out when not logged in should still work.
-	Logout(tc)
-
-	fu := CreateAndSignupFakeUser(tc, "login")
-
-	if err := AssertLoggedIn(tc); err != nil {
-		t.Error("Unexpectedly logged out (Session)")
-	}
-
-	Logout(tc)
-
-	if err := AssertLoggedOut(tc); err != nil {
-		t.Error("Unexpectedly logged in (Session)")
-	}
-
-	if LoggedIn(tc) {
-		t.Error("Unexpectedly logged in (LoginState)")
-	}
-
-	// Logging out twice should still work.
-	Logout(tc)
-
-	if err := AssertLoggedOut(tc); err != nil {
-		t.Error("Unexpectedly logged in (Session)")
-	}
-
-	if LoggedIn(tc) {
-		t.Error("Unexpectedly logged in (LoginState)")
-	}
-
-	secretUI := &libkb.TestSecretUI{Passphrase: fu.Passphrase}
-	if err := tc.G.LoginState().LoginWithPrompt("", nil, secretUI, nil); err != nil {
-		t.Error(err)
-	}
-
-	if err := AssertLoggedIn(tc); err != nil {
-		t.Error("Unexpectedly logged out (Session)")
-	}
-
-	if !LoggedIn(tc) {
-		t.Error("Unexpectedly logged out (LoginState)")
-	}
-}
-
 // This mock (and the similar ones below) may be used from a goroutine
 // different from the main one, so don't mess with testing.T (which
 // isn't safe to use from a non-main goroutine) directly, and instead
@@ -139,7 +81,7 @@ func TestLoginAfterLoginStateReset(t *testing.T) {
 	defer tc.Cleanup()
 
 	// Logs the user in.
-	_ = CreateAndSignupFakeUser(tc, "li")
+	_ = SignupFakeUserStoreSecret(tc, "li")
 
 	tc.ResetLoginState()
 
@@ -388,43 +330,6 @@ func TestLoginWithPassphraseNoStore(t *testing.T) {
 
 	if err := tc.G.LoginState().LoginWithStoredSecret(fu.Username, nil); err == nil {
 		t.Error("Did not get expected error")
-	}
-
-	if userHasStoredSecret(&tc, fu.Username) {
-		t.Errorf("User %s unexpectedly has a stored secret", fu.Username)
-	}
-}
-
-// Test that the login flow with passphrase and with saving the secret
-// works.
-func TestLoginWithPassphraseWithStore(t *testing.T) {
-
-	tc := SetupEngineTest(t, "login with passphrase (with store)")
-	defer tc.Cleanup()
-
-	fu := CreateAndSignupFakeUser(tc, "lwpws")
-	Logout(tc)
-
-	if userHasStoredSecret(&tc, fu.Username) {
-		t.Errorf("User %s unexpectedly has a stored secret", fu.Username)
-	}
-
-	if err := tc.G.LoginState().LoginWithPassphrase(fu.Username, fu.Passphrase, true, nil); err != nil {
-		t.Error(err)
-	}
-
-	if !userHasStoredSecret(&tc, fu.Username) {
-		t.Errorf("User %s unexpectedly does not have a stored secret", fu.Username)
-	}
-
-	// TODO: Mock out the SecretStore and make sure that it's
-	// actually consulted.
-	if err := tc.G.LoginState().LoginWithStoredSecret(fu.Username, nil); err != nil {
-		t.Error(err)
-	}
-
-	if err := libkb.ClearStoredSecret(tc.G, fu.NormalizedUsername()); err != nil {
-		t.Error(err)
 	}
 
 	if userHasStoredSecret(&tc, fu.Username) {

@@ -14,7 +14,6 @@ const Offline = () => (
     style={{
       ...globalStyles.flexBoxCenter,
       backgroundColor: globalColors.grey,
-      maxHeight: 48,
       paddingBottom: globalMargins.tiny,
       paddingLeft: globalMargins.medium,
       paddingRight: globalMargins.medium,
@@ -40,6 +39,7 @@ class Conversation extends React.PureComponent<Props> {
         />
         {this.props.showLoader && <LoadingLine />}
         <ListArea
+          onToggleInfoPanel={this.props.onOpenInfoPanelMobile}
           listScrollDownCounter={this.props.listScrollDownCounter}
           onFocusInput={this.props.onFocusInput}
           conversationIDKey={this.props.conversationIDKey}

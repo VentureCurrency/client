@@ -140,7 +140,7 @@ function logFileName(): string {
     case 'darwin':
       return `${logDir()}/${envedPathOSX[runMode]}.app.log`
     case 'linux':
-      return '' // linux is '' because we can redirect stdout
+      return '' // Linux is '' because we can redirect stdout
     case 'win32':
       return `${logDir()}\\keybase.app.log`
   }
@@ -159,7 +159,7 @@ const jsonDebugFileName = (function() {
   throw new Error(`Unknown platform ${process.platform}`)
 })()
 
-function traceDir(): string {
+function pprofDir(): string {
   // Empty string means let the service figure out the right directory.
   return ''
 }
@@ -195,6 +195,6 @@ export {
   mobileOsVersion,
   runMode,
   socketPath,
-  traceDir,
+  pprofDir,
   version,
 }

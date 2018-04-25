@@ -18,6 +18,7 @@ import DumbSheet from '../dev/dumb-sheet'
 import Passphrase from './passphrase/container'
 import UserEmail from './email/container'
 import PlanDetails from './plan-details/container'
+import SecurityPrefs from '../fs/common/security-prefs-container.desktop'
 
 const routeTree = makeRouteDefNode({
   defaultSelected: Constants.landingTab,
@@ -64,15 +65,19 @@ const routeTree = makeRouteDefNode({
         },
       },
     },
-    [Constants.devMenuTab]: {
-      component: DevMenu,
-      children: {
-        dumbSheet: {
-          component: DumbSheet,
-          tags: makeLeafTags({modal: true}),
-        },
-      },
-    },
+    ...(__DEV__
+      ? {
+          [Constants.devMenuTab]: {
+            component: DevMenu,
+            children: {
+              dumbSheet: {
+                component: DumbSheet,
+                tags: makeLeafTags({modal: true}),
+              },
+            },
+          },
+        }
+      : {}),
     [Constants.advancedTab]: {
       component: AdvancedContainer,
       children: {
@@ -84,7 +89,11 @@ const routeTree = makeRouteDefNode({
     },
     [Constants.fsTab]: {
       component: FilesContainer,
-      children: {},
+      children: {
+        securityPrefs: {
+          component: SecurityPrefs,
+        },
+      },
     },
   },
 })

@@ -55,6 +55,20 @@ export const formatTimeForFS = (time: number): string =>
     },
   })
 
+export const formatDurationFromNowTo = (timeInFuture?: number): string => {
+  if (!timeInFuture) {
+    return '? s'
+  }
+  const d = moment.duration(-moment().diff(timeInFuture))
+  if (d.hours()) {
+    return `${d.hours()} hr`
+  } else if (d.minutes()) {
+    return `${d.minutes()} min`
+  } else {
+    return `${d.seconds()} s`
+  }
+}
+
 export function formatTimeForPopup(time: number): string {
   const m = moment(time)
   return m.format('ddd MMM DD h:mm A') // Wed Jan 5 2016 4:34 PM
@@ -63,4 +77,12 @@ export function formatTimeForPopup(time: number): string {
 export function formatTimeForRevoked(time: number): string {
   const m = moment(time)
   return m.format('ddd MMM DD') // Wed Jan 5 2016
+}
+
+export function daysToLabel(days: number): string {
+  let label = `${days} day`
+  if (days !== 1) {
+    label += 's'
+  }
+  return label
 }

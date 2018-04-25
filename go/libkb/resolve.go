@@ -105,7 +105,7 @@ func (res *ResolveResult) GetDeleted() bool {
 
 func (res ResolveResult) FailOnDeleted() ResolveResult {
 	if res.deleted {
-		res.err = DeletedError{Msg: fmt.Sprintf("user %q deleted", res.uid)}
+		res.err = UserDeletedError{Msg: fmt.Sprintf("user %q deleted", res.uid)}
 	}
 	return res
 }
@@ -382,6 +382,9 @@ func (r *Resolver) resolveTeamViaServerLookup(ctx context.Context, au AssertionU
 	arg.Args = make(HTTPArgs)
 	arg.Args[key] = S{Val: val}
 	arg.Args["lookup_only"] = B{Val: true}
+	if res.queriedByTeamID && au.ToTeamID().IsPublic() {
+		arg.Args["public"] = B{Val: true}
+	}
 
 	var lookup teamLookup
 	if err := r.G().API.GetDecode(arg, &lookup); err != nil {

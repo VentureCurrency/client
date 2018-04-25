@@ -94,7 +94,7 @@ func (e *Login) Run(ctx *Context) error {
 	}
 
 	// clear out any existing session:
-	e.G().Log.Debug("clearing any exising login session with Logout before loading user for login")
+	e.G().Log.Debug("clearing any existing login session with Logout before loading user for login")
 	e.G().Logout()
 
 	// run the LoginLoadUser sub-engine to load a user
@@ -154,7 +154,6 @@ func (e *Login) notProvisionedErr(err error) bool {
 	}
 
 	e.G().Log.Debug("notProvisioned, not handling error %s (err type: %T)", err, err)
-
 	return false
 }
 

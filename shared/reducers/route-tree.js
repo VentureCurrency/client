@@ -5,7 +5,6 @@ import * as CommonConstants from '../constants/common'
 import * as Types from '../constants/types/route-tree'
 import * as Constants from '../constants/route-tree'
 import {
-  InvalidRouteError,
   getPath,
   pathToString,
   routeSetProps,
@@ -20,7 +19,7 @@ import {isValidInitialTabString} from '../constants/tabs'
 
 // This makes an empty one which isn't really allowed, we always init it before anything really happens
 const initialState = Constants.makeState()
-// So lets actually use the initial routeDef we get
+// So let's actually use the initial routeDef we get
 let firstRouteDef: ?RouteDefNode
 
 function computeLoggedInUserNavigated(navigationSource: Types.NavigationSource, newSelectedTab: ?string) {
@@ -67,6 +66,26 @@ function loggedInUserNavigatedReducer(loggedInUserNavigated, newSelectedTab, act
   return newLoggedInUserNavigated
 }
 
+const getCurrentRouteTree = (routeDef: ?RouteDefNode, action: Types.RefreshRouteDef): RouteDefNode => {
+  let res = action.payload.appRouteTree
+  let title = ''
+  if (routeDef && routeDef.tags && routeDef.tags.title) {
+    title = routeDef.tags.title
+  }
+  switch (title) {
+    case loginRouteTreeTitle:
+      res = action.payload.loginRouteTree
+      break
+    case appRouteTreeTitle:
+      res = action.payload.appRouteTree
+      break
+    default:
+      throw new Error(`Current routeDef has unknown title ${title}`)
+  }
+  // $FlowIssue ReturnType<makeRouteDefNode> is compatible with RouteDefNode
+  return res
+}
+
 function routeDefReducer(routeDef: ?RouteDefNode, action) {
   switch (action.type) {
     case Constants.setInitialRouteDef:
@@ -79,18 +98,7 @@ function routeDefReducer(routeDef: ?RouteDefNode, action) {
       return action.payload.routeDef
 
     case Constants.refreshRouteDef:
-      let title = ''
-      if (routeDef && routeDef.tags && routeDef.tags.title) {
-        title = routeDef.tags.title
-      }
-      switch (title) {
-        case loginRouteTreeTitle:
-          return action.payload.loginDef
-        case appRouteTreeTitle:
-          return action.payload.appDef
-        default:
-          throw new Error(`Current routeDef has unknown title ${title}`)
-      }
+      return getCurrentRouteTree(routeDef, action)
 
     case Constants.switchRouteDef:
       return action.payload.routeDef
@@ -110,7 +118,8 @@ function routeStateReducer(routeDef, routeState, action) {
     }
 
     case Constants.refreshRouteDef: {
-      return routeNavigate(action.payload.routeDef, routeState, getPath(routeState))
+      const currentRouteTree = getCurrentRouteTree(routeDef, action)
+      return routeNavigate(currentRouteTree, routeState, getPath(routeState))
     }
 
     case Constants.switchRouteDef: {
@@ -172,7 +181,7 @@ export default function routeTreeReducer(state: Types.State = initialState, acti
       action
     )
   } catch (err) {
-    if (action.type === Constants.refreshRouteDef && err instanceof InvalidRouteError) {
+    if (action.type === Constants.refreshRouteDef && err && err.messsage.startsWith('RT:')) {
       logger.warn('New route tree mismatches current state. Not updating (please reload manually if needed).')
     } else {
       logger.error(

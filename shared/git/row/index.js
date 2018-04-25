@@ -11,12 +11,12 @@ import {
   Avatar,
   Meta,
   Usernames,
-  HOCTimers,
 } from '../../common-adapters'
+import HOCTimers, {type TimerProps} from '../../common-adapters/hoc-timers'
 
-import {globalStyles, globalColors, globalMargins, transition, isMobile} from '../../styles'
+import {globalStyles, globalColors, globalMargins, platformStyles, transition, isMobile} from '../../styles'
 
-export type Props = {
+type _Props = {
   canDelete: boolean,
   canEdit: boolean,
   channelName: ?string,
@@ -37,9 +37,10 @@ export type Props = {
   onChannelClick: (SyntheticEvent<>) => void,
   onToggleChatEnabled: () => void,
   onToggleExpand: () => void,
-  setTimeout: (() => void, number) => number,
   openUserTracker: (username: string) => void,
 }
+
+export type Props = _Props & TimerProps
 
 type State = {
   showingCopy: boolean,
@@ -118,7 +119,9 @@ class Row extends React.Component<Props, State> {
               <Text type="BodySemibold" style={{color: globalColors.darkBlue}}>
                 {this.props.teamname ? `${this.props.teamname}/${this.props.name}` : this.props.name}
               </Text>
-              {this.props.isNew && <Meta title="New" style={_metaStyle} />}
+              {this.props.isNew && (
+                <Meta title="new" style={_metaStyle} backgroundColor={globalColors.orange} />
+              )}
             </Box>
           </ClickableBox>
           {this.props.expanded && (
@@ -306,23 +309,28 @@ const _copyStyle = {
   paddingRight: isMobile ? 24 : 12,
 }
 
-const _inputInputStyle = {
-  ...globalStyles.fontTerminal,
+const _inputInputStyle = platformStyles({
+  common: {
+    ...globalStyles.fontTerminal,
+    color: globalColors.darkBlue,
+  },
   // on desktop the input text isn't vertically aligned
-  ...(isMobile
-    ? {fontSize: 15}
-    : {
-        display: 'inline-block',
-        fontSize: 13,
-        paddingTop: 3,
-      }),
-  color: globalColors.darkBlue,
-}
+  isMobile: {fontSize: 15},
+  isElectron: {
+    display: 'inline-block',
+    fontSize: 13,
+    paddingTop: 3,
+  },
+})
 
-const _inputStyle = {
-  paddingTop: isMobile ? 10 : undefined,
-  width: '100%',
-}
+const _inputStyle = platformStyles({
+  common: {
+    width: '100%',
+  },
+  isMobile: {
+    paddingTop: 10,
+  },
+})
 
 const _bubbleStyle = {
   ...globalStyles.flexBoxCenter,
@@ -366,7 +374,6 @@ const _iconCaretStyle = {
 
 const _metaStyle = {
   alignSelf: 'center',
-  backgroundColor: globalColors.orange,
   marginLeft: 6,
 }
 

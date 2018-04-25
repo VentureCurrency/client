@@ -1,8 +1,7 @@
 // @flow
 // High level avatar class. Handdles converting from usernames to urls. Deals with testing mode.
 import Render from './avatar.render'
-import pickBy from 'lodash/pickBy'
-import debounce from 'lodash/debounce'
+import {pickBy, debounce} from 'lodash-es'
 import {iconTypeToImgSet, urlsToImgSet, type IconType} from './icon'
 import {isTesting} from '../local-debug'
 import {
@@ -121,7 +120,6 @@ const mapStateToProps = (state: TypedState, ownProps: Props) => {
   }
 
   return {
-    _needAskForData: !state.config.avatars.hasOwnProperty(name),
     _urlMap,
   }
 }
@@ -187,19 +185,17 @@ const mergeProps = (stateProps, dispatchProps, ownProps) => {
     isPlaceholder = false
   }
 
-  if (!url && !stateProps._needAskForData) {
+  if (!url) {
     const placeholder = isTeam ? teamPlaceHolders : avatarPlaceHolders
     url = iconTypeToImgSet(placeholder[String(ownProps.size)], ownProps.size)
     isPlaceholder = true
   }
 
   let _askForUserData = null
-  if (stateProps._needAskForData) {
-    if (isTeam) {
-      _askForUserData = () => dispatchProps._askForTeamUserData(ownProps.teamname)
-    } else {
-      _askForUserData = () => dispatchProps._askForUserData(ownProps.username)
-    }
+  if (isTeam) {
+    _askForUserData = () => dispatchProps._askForTeamUserData(ownProps.teamname)
+  } else {
+    _askForUserData = () => dispatchProps._askForUserData(ownProps.username)
   }
 
   const _name = isTeam ? ownProps.teamname : ownProps.username
@@ -248,18 +244,18 @@ const realConnector = compose(
       }
     },
   }),
-  // $FlowIssue
+  // $FlowIssue : todo just have one connector for avatar and pass a flag to include the follow or not
   lifecycle({
-    componentWillMount() {
+    componentDidMount() {
       const _timeoutID = setTimeout(() => {
         if (this.props._name === this.props._stateName) {
           this.props._maybeLoadUserData()
         }
-      }, 700)
+      }, 200)
       this.props.setMounted(this.props._name, _timeoutID)
     },
-    componentWillReceiveProps(nextProps) {
-      if (this.props._name !== nextProps._name) {
+    componentDidUpdate(prevProps) {
+      if (this.props._name !== prevProps._name) {
         this.props._maybeLoadUserData()
       }
     },

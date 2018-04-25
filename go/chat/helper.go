@@ -210,6 +210,29 @@ func (h *Helper) UpgradeKBFSToImpteam(ctx context.Context, tlfName string, tlfID
 		public, keybase1.TeamApplication_CHAT, cryptKeys)
 }
 
+func (h *Helper) GetMessages(ctx context.Context, uid gregor1.UID, convID chat1.ConversationID,
+	msgIDs []chat1.MessageID, resolveSupersedes bool) ([]chat1.MessageUnboxed, error) {
+	conv, _, err := GetUnverifiedConv(ctx, h.G(), uid, convID, true)
+	if err != nil {
+		return nil, err
+	}
+
+	// use ConvSource to get the messages, to try the cache first
+	messages, err := h.G().ConvSource.GetMessages(ctx, conv, uid, msgIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// unless arg says not to, transform the superseded messages
+	if resolveSupersedes {
+		messages, err = h.G().ConvSource.TransformSupersedes(ctx, conv, uid, messages)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
 type sendHelper struct {
 	utils.DebugLabeler
 
@@ -626,7 +649,7 @@ L:
 			case chat1.ConversationMembersType_KBFS:
 				debugger.Debug(ctx, "FindConversations: failed with KBFS, aborting")
 				// We don't want to return random errors from KBFS if we are falling back to it,
-				// just return no conversatins and call it a day
+				// just return no conversations and call it a day
 				if membersTypeIn == chat1.ConversationMembersType_KBFS {
 					err = ierr
 				}

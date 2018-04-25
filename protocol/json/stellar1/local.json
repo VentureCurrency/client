@@ -1,0 +1,245 @@
+{
+  "protocol": "local",
+  "imports": [
+    {
+      "path": "common.avdl",
+      "type": "idl"
+    }
+  ],
+  "types": [
+    {
+      "type": "record",
+      "name": "PaymentCLILocal",
+      "fields": [
+        {
+          "type": "TransactionID",
+          "name": "stellarTxID"
+        },
+        {
+          "type": "TimeMs",
+          "name": "time"
+        },
+        {
+          "type": "string",
+          "name": "status"
+        },
+        {
+          "type": "string",
+          "name": "statusDetail"
+        },
+        {
+          "type": "string",
+          "name": "amount"
+        },
+        {
+          "type": "Asset",
+          "name": "asset"
+        },
+        {
+          "type": [
+            null,
+            "string"
+          ],
+          "name": "displayAmount"
+        },
+        {
+          "type": [
+            null,
+            "string"
+          ],
+          "name": "displayCurrency"
+        },
+        {
+          "type": "AccountID",
+          "name": "fromStellar"
+        },
+        {
+          "type": "AccountID",
+          "name": "toStellar"
+        },
+        {
+          "type": [
+            null,
+            "string"
+          ],
+          "name": "fromUsername"
+        },
+        {
+          "type": [
+            null,
+            "string"
+          ],
+          "name": "toUsername"
+        },
+        {
+          "type": "string",
+          "name": "note"
+        },
+        {
+          "type": "string",
+          "name": "noteErr"
+        }
+      ]
+    },
+    {
+      "type": "record",
+      "name": "LocalOwnAccount",
+      "fields": [
+        {
+          "type": "AccountID",
+          "name": "accountID"
+        },
+        {
+          "type": "boolean",
+          "name": "isPrimary"
+        },
+        {
+          "type": "string",
+          "name": "name"
+        },
+        {
+          "type": {
+            "type": "array",
+            "items": "Balance"
+          },
+          "name": "balance"
+        },
+        {
+          "type": [
+            null,
+            "OutsideExchangeRate"
+          ],
+          "name": "exchangeRate"
+        }
+      ]
+    }
+  ],
+  "messages": {
+    "balancesLocal": {
+      "request": [
+        {
+          "name": "accountID",
+          "type": "AccountID"
+        }
+      ],
+      "response": {
+        "type": "array",
+        "items": "Balance"
+      }
+    },
+    "sendLocal": {
+      "request": [
+        {
+          "name": "recipient",
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "type": "string"
+        },
+        {
+          "name": "asset",
+          "type": "Asset"
+        },
+        {
+          "name": "note",
+          "type": "string"
+        }
+      ],
+      "response": "PaymentResult"
+    },
+    "recentPaymentsCLILocal": {
+      "request": [
+        {
+          "name": "accountID",
+          "type": [
+            null,
+            "AccountID"
+          ]
+        }
+      ],
+      "response": {
+        "type": "array",
+        "items": "PaymentCLILocal"
+      }
+    },
+    "paymentDetailCLILocal": {
+      "request": [
+        {
+          "name": "txID",
+          "type": "string"
+        }
+      ],
+      "response": "PaymentCLILocal"
+    },
+    "walletInitLocal": {
+      "request": [],
+      "response": null
+    },
+    "walletDumpLocal": {
+      "request": [],
+      "response": "Bundle"
+    },
+    "walletGetLocalAccounts": {
+      "request": [],
+      "response": {
+        "type": "array",
+        "items": "LocalOwnAccount"
+      }
+    },
+    "ownAccountLocal": {
+      "request": [
+        {
+          "name": "accountID",
+          "type": "AccountID"
+        }
+      ],
+      "response": "boolean"
+    },
+    "importSecretKeyLocal": {
+      "request": [
+        {
+          "name": "secretKey",
+          "type": "SecretKey"
+        },
+        {
+          "name": "makePrimary",
+          "type": "boolean"
+        }
+      ],
+      "response": null
+    },
+    "exportSecretKeyLocal": {
+      "request": [
+        {
+          "name": "accountID",
+          "type": "AccountID"
+        }
+      ],
+      "response": "SecretKey"
+    },
+    "setDisplayCurrency": {
+      "request": [
+        {
+          "name": "accountID",
+          "type": "AccountID"
+        },
+        {
+          "name": "currency",
+          "type": "string"
+        }
+      ],
+      "response": null
+    },
+    "exchangeRateLocal": {
+      "request": [
+        {
+          "name": "currency",
+          "type": "OutsideCurrencyCode"
+        }
+      ],
+      "response": "OutsideExchangeRate"
+    }
+  },
+  "namespace": "stellar.1"
+}

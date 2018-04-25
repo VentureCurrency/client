@@ -3,11 +3,10 @@ package systests
 import (
 	"testing"
 
-	"golang.org/x/net/context"
-
 	keybase1 "github.com/keybase/client/go/protocol/keybase1"
 	"github.com/keybase/client/go/teams"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/context"
 )
 
 func findMember(user *smuUser, members []keybase1.TeamMemberDetails) *keybase1.TeamMemberDetails {
@@ -204,7 +203,6 @@ func TestTeamDuplicateUIDList(t *testing.T) {
 	t.Logf("Team created (%s)", team)
 
 	ann.addTeamMember(team, bob.username, keybase1.TeamRole_WRITER)
-
 	bob.reset()
 	bob.loginAfterReset()
 

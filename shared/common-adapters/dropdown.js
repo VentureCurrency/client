@@ -3,13 +3,21 @@ import * as React from 'react'
 import Box from './box'
 import PopupDialog from './popup-dialog'
 import Icon from './icon'
-import {globalStyles, globalColors, globalMargins, glamorous, isMobile, desktopStyles} from '../styles'
+import {
+  type StylesCrossPlatform,
+  globalStyles,
+  globalColors,
+  globalMargins,
+  glamorous,
+  isMobile,
+  desktopStyles,
+} from '../styles'
 
 type Props = {
   onChanged: (selected: React.Node) => void,
   selected?: React.Node,
   items: Array<React.Node>,
-  style?: any,
+  style?: StylesCrossPlatform,
 }
 type State = {
   expanded: boolean,
@@ -25,10 +33,11 @@ class Dropdown extends React.Component<Props, State> {
     }
   }
 
-  componentWillReceiveProps(nextProps: Props) {
-    if (this.props.selected !== nextProps.selected) {
-      this.setState({selected: nextProps.selected})
+  static getDerivedStateFromProps(nextProps: Props, prevState: State) {
+    if (nextProps.selected !== prevState.selected) {
+      return {selected: nextProps.selected}
     }
+    return null
   }
 
   _toggleOpen = () => {

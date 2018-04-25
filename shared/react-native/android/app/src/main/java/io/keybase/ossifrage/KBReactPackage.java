@@ -6,18 +6,17 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.uimanager.ViewManager;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
-import io.keybase.ossifrage.components.CustomTextInputManager;
-import io.keybase.ossifrage.components.VisiblePassReactEditTextManager;
 import io.keybase.ossifrage.modules.KeybaseEngine;
 import io.keybase.ossifrage.modules.KillableModule;
 import io.keybase.ossifrage.modules.LogSend;
 import io.keybase.ossifrage.modules.NativeLogger;
 import io.keybase.ossifrage.modules.NativeSettings;
 import io.keybase.ossifrage.modules.ScreenProtector;
+import io.keybase.ossifrage.modules.ShareFiles;
 
 public class KBReactPackage implements com.facebook.react.ReactPackage {
     private final String logFilePath;
@@ -41,6 +40,7 @@ public class KBReactPackage implements com.facebook.react.ReactPackage {
         final ScreenProtector screenProtector = new ScreenProtector(reactApplicationContext);
         final NativeSettings nativeSettings = new NativeSettings(reactApplicationContext);
         final NativeLogger nativeLogger = new NativeLogger(reactApplicationContext);
+        final ShareFiles shareFiles = new ShareFiles(reactApplicationContext);
 
         killableModules.add(kbEngine);
 
@@ -50,18 +50,13 @@ public class KBReactPackage implements com.facebook.react.ReactPackage {
         modules.add(screenProtector);
         modules.add(nativeSettings);
         modules.add(nativeLogger);
+        modules.add(shareFiles);
 
-        return modules;
-    }
-
-    public List<Class<? extends JavaScriptModule>> createJSModules() {
-        List<Class<? extends JavaScriptModule>> modules = new ArrayList<>();
         return modules;
     }
 
     @Override
     public List<ViewManager> createViewManagers(ReactApplicationContext reactApplicationContext) {
-        List<ViewManager> modules = Arrays.<ViewManager>asList(new VisiblePassReactEditTextManager(), new CustomTextInputManager());
-        return modules;
+        return Collections.emptyList();
     }
 }

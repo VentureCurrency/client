@@ -42,7 +42,7 @@ func (c *PassphraseChange) Prereqs() Prereqs {
 		return Prereqs{}
 	}
 
-	return Prereqs{Session: true}
+	return Prereqs{Device: true}
 }
 
 // RequiredUIs returns the required UIs.
@@ -201,7 +201,7 @@ func (c *PassphraseChange) forceUpdatePassphrase(ctx *Context, sigKey libkb.Gene
 		}
 
 		// Reset passphrase stream cache so that subsequent updates go through
-		// without a problem (seee CORE-3933)
+		// without a problem (see CORE-3933)
 		a.ClearStreamCache()
 	}, "PassphraseChange.runForcedUpdate")
 	if acctErr != nil {

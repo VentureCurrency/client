@@ -161,6 +161,17 @@ type TestParameters struct {
 
 	// set to true to use production run mode in tests
 	UseProductionRunMode bool
+
+	// whether LogoutIfRevoked check should be skipped to avoid races
+	// during resets.
+	SkipLogoutIfRevokedCheck bool
+
+	// On if, in test, we want to skip sending system chat messages
+	SkipSendingSystemChatMessages bool
+
+	// If we need to use the real clock for NIST generation (as in really
+	// whacky tests liks TestRekey).
+	UseTimeClockForNISTs bool
 }
 
 func (tp TestParameters) GetDebug() (bool, bool) {
@@ -251,6 +262,9 @@ func (e *Env) GetMountDir() (string, error) {
 					"%s (%s)", runmodeName, user.Username))
 			case "linux":
 				return filepath.Join(e.GetRuntimeDir(), "kbfs")
+			// kbfsdokan depends on an empty default
+			case "windows":
+				return ""
 			default:
 				return filepath.Join(e.GetRuntimeDir(), "kbfs")
 			}
@@ -293,6 +307,14 @@ func (e *Env) GetCacheDir() string        { return e.HomeFinder.CacheDir() }
 func (e *Env) GetSandboxCacheDir() string { return e.HomeFinder.SandboxCacheDir() }
 func (e *Env) GetDataDir() string         { return e.HomeFinder.DataDir() }
 func (e *Env) GetLogDir() string          { return e.HomeFinder.LogDir() }
+
+func (e *Env) SendSystemChatMessages() bool {
+	return !e.Test.SkipSendingSystemChatMessages
+}
+
+func (e *Env) UseTimeClockForNISTs() bool {
+	return e.Test.UseTimeClockForNISTs
+}
 
 func (e *Env) GetRuntimeDir() string {
 	return e.GetString(
@@ -561,6 +583,12 @@ func (e *Env) GetAPIDump() bool {
 	)
 }
 
+func (e *Env) GetAllowRoot() bool {
+	return e.GetBool(false,
+		func() (bool, bool) { return e.getEnvBool("KEYBASE_ALLOW_ROOT") },
+	)
+}
+
 func (e *Env) GetUsername() NormalizedUsername {
 	return e.GetConfig().GetUsername()
 }
@@ -683,6 +711,12 @@ func (e *Env) GetEmail() string {
 // Upgrade sigchains to contain per-user-keys.
 func (e *Env) GetUpgradePerUserKey() bool {
 	return !e.Test.DisableUpgradePerUserKey
+}
+
+// If true, do not logout after user.key_change notification handler
+// decides that current device has been revoked.
+func (e *Env) GetSkipLogoutIfRevokedCheck() bool {
+	return e.Test.SkipLogoutIfRevokedCheck
 }
 
 func (e *Env) GetProxy() string {
@@ -1063,6 +1097,13 @@ func (e *Env) GetChatMemberType() string {
 	)
 }
 
+func (e *Env) GetAvatarSource() string {
+	return e.GetString(
+		func() string { return os.Getenv("KEYBASE_AVATAR_SOURCE") },
+		func() string { return "full" },
+	)
+}
+
 func (e *Env) GetDeviceID() keybase1.DeviceID {
 	return e.GetConfig().GetDeviceID()
 }
@@ -1308,7 +1349,7 @@ func (e *Env) WantsSystemd() bool {
 		os.Getenv("KEYBASE_SYSTEMD") != "0")
 }
 
-func (e *Env) ForceSecretStoreFile() bool {
+func (e *Env) DarwinForceSecretStoreFile() bool {
 	return (e.GetRunMode() == DevelRunMode &&
 		os.Getenv("KEYBASE_SECRET_STORE_FILE") == "1")
 }

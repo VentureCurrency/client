@@ -8,6 +8,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"golang.org/x/net/context"
 
@@ -58,7 +59,10 @@ func (r *teamHandler) Create(ctx context.Context, cli gregor1.IncomingInterface,
 	case "team.abandoned":
 		return true, r.abandonTeam(ctx, cli, item)
 	default:
-		return false, fmt.Errorf("unknown teamHandler category: %q", category)
+		if strings.HasPrefix(category, "team.") {
+			return false, fmt.Errorf("unknown teamHandler category: %q", category)
+		}
+		return false, nil
 	}
 }
 
@@ -71,7 +75,7 @@ func (r *teamHandler) rotateTeam(ctx context.Context, cli gregor1.IncomingInterf
 	}
 	r.G().Log.CDebugf(ctx, "team.clkr unmarshaled: %+v", msg)
 
-	if err := teams.HandleRotateRequest(ctx, r.G(), msg.TeamID, keybase1.PerTeamKeyGeneration(msg.Generation)); err != nil {
+	if err := teams.HandleRotateRequest(ctx, r.G(), msg); err != nil {
 		return err
 	}
 

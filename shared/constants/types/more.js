@@ -1,6 +1,6 @@
 // @flow
 import {Component} from 'react' // eslint-disable-line
-import pickBy from 'lodash/pickBy'
+import {pickBy} from 'lodash-es'
 
 const ProvablePlatformsMap = {
   twitter: true,
@@ -31,11 +31,11 @@ const PlatformsExpandedMap = {
   pgp: true,
 }
 
-export const ProvablePlatforms = Object.keys(pickBy(ProvablePlatformsMap))
 export type ProvablePlatformsType = $Keys<typeof ProvablePlatformsMap>
+export const ProvablePlatforms: Array<*> = Object.keys(pickBy(ProvablePlatformsMap))
 
-export const PlatformsExpanded = Object.keys(pickBy(PlatformsExpandedMap))
 export type PlatformsExpandedType = $Keys<typeof PlatformsExpandedMap>
+export const PlatformsExpanded: Array<*> = Object.keys(pickBy(PlatformsExpandedMap))
 
 export type Exact<X> = $Shape<X> & X
 

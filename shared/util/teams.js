@@ -1,5 +1,6 @@
 // @flow
 import {publicAdminsLimit} from '../constants/teams'
+import type {RetentionPolicy} from '../constants/types/teams'
 
 type SortedAdmins = {
   publicAdmins: Array<string>,
@@ -22,4 +23,33 @@ function parsePublicAdmins(publicAdmins: Array<string>, you: ?string): SortedAdm
   return {publicAdmins, publicAdminsOthers}
 }
 
-export {parsePublicAdmins}
+// Parses retention polcies into a string suitable for display at the top of a conversation
+function makeRetentionNotice(
+  policy: RetentionPolicy,
+  teamPolicy: RetentionPolicy,
+  teamType: 'adhoc' | 'big' | 'small'
+): ?string {
+  if (policy.type === 'retain' || (policy.type === 'inherit' && teamPolicy.type === 'retain')) {
+    // Messages stick around forever; no explanation needed
+    return null
+  }
+
+  let convType = 'chat'
+  if (teamType === 'big') {
+    convType = 'channel'
+  }
+  let explanation = ''
+  switch (policy.type) {
+    case 'expire':
+      explanation = `are destroyed after ${policy.days} day${policy.days !== 1 ? 's' : ''}.`
+      break
+    case 'inherit':
+      // teamPolicy can't be retain
+      explanation = `are destroyed after ${teamPolicy.days} day${teamPolicy.days !== 1 ? 's' : ''}`
+      explanation += teamType === 'small' ? '.' : ', the team default.'
+      break
+  }
+  return `Messages in this ${convType} ${explanation}`
+}
+
+export {makeRetentionNotice, parsePublicAdmins}

@@ -245,7 +245,8 @@ func AddMemberByID(ctx context.Context, g *libkb.GlobalContext, teamID keybase1.
 
 func AddMember(ctx context.Context, g *libkb.GlobalContext, teamname, username string, role keybase1.TeamRole) (res keybase1.TeamAddMemberResult, err error) {
 	team, err := Load(ctx, g, keybase1.LoadTeamArg{
-		Name: teamname,
+		Name:        teamname,
+		ForceRepoll: true,
 	})
 	if err != nil {
 		return res, err
@@ -304,7 +305,7 @@ func ReAddMemberAfterReset(ctx context.Context, g *libkb.GlobalContext, teamID k
 		hasPUK := len(upak.Current.PerUserKeys) > 0
 
 		tx := CreateAddMemberTx(t)
-		if err := tx.ReAddMemberToImplicitTeam(ctx, uv, hasPUK, existingRole); err != nil {
+		if err := tx.ReAddMemberToImplicitTeam(uv, hasPUK, existingRole); err != nil {
 			return err
 		}
 
@@ -363,7 +364,7 @@ func AddEmailsBulk(ctx context.Context, g *libkb.GlobalContext, teamname, emails
 			res.Invited = append(res.Invited, addr.Address)
 		}
 		if len(invites) == 0 {
-			g.Log.CDebugf(ctx, "team %s: after exisitng filter, no one to invite", teamname)
+			g.Log.CDebugf(ctx, "team %s: after existing filter, no one to invite", teamname)
 			// return value assign to escape closure
 			resOuter = res
 			return nil
@@ -383,7 +384,7 @@ func AddEmailsBulk(ctx context.Context, g *libkb.GlobalContext, teamname, emails
 			return fmt.Errorf("unknown team role: %s", role)
 		}
 
-		g.Log.CDebugf(ctx, "team %s: after exisitng filter, inviting %d emails as %s", teamname, len(invites), role)
+		g.Log.CDebugf(ctx, "team %s: after existing filter, inviting %d emails as %s", teamname, len(invites), role)
 		err = t.postTeamInvites(ctx, teamInvites)
 		if err != nil {
 			return err
@@ -500,15 +501,15 @@ func RemoveMember(ctx context.Context, g *libkb.GlobalContext, teamname, usernam
 
 		existingUV, err := t.UserVersionByUID(ctx, uv.Uid)
 		if err != nil {
-			// Try to remove as an invite
-			if ierr := removeMemberInvite(ctx, g, t, username, uv); ierr == nil {
+			// Try to remove as an keybase-invite
+			if ierr := removeKeybaseTypeInviteForUID(ctx, g, t, uv.Uid); ierr == nil {
 				return nil
 			}
 			return libkb.NotFoundError{Msg: fmt.Sprintf("user %q is not a member of team %q", username,
 				teamname)}
 		}
 
-		me, err := libkb.LoadMe(libkb.NewLoadUserArgWithContext(ctx, g))
+		me, err := loadMeForSignatures(ctx, g)
 		if err != nil {
 			return err
 		}
@@ -978,8 +979,14 @@ func (r *accessRequestList) GetAppStatus() *libkb.AppStatus {
 	return &r.Status
 }
 
-func ListRequests(ctx context.Context, g *libkb.GlobalContext) ([]keybase1.TeamJoinRequest, error) {
-	arg := apiArg(ctx, "team/laar")
+func ListRequests(ctx context.Context, g *libkb.GlobalContext, teamName *string) ([]keybase1.TeamJoinRequest, error) {
+	var arg libkb.APIArg
+	if teamName != nil {
+		arg = apiArg(ctx, "team/access_requests")
+		arg.Args.Add("team", libkb.S{Val: *teamName})
+	} else {
+		arg = apiArg(ctx, "team/laar")
+	}
 
 	var arList accessRequestList
 	if err := g.API.GetDecode(arg, &arList); err != nil {
@@ -1150,6 +1157,36 @@ func removeMemberInviteOfType(ctx context.Context, g *libkb.GlobalContext, team 
 	return libkb.NotFoundError{}
 }
 
+func removeKeybaseTypeInviteForUID(ctx context.Context, g *libkb.GlobalContext, team *Team, uid keybase1.UID) error {
+	g.Log.CDebugf(ctx, "looking for active or obsolete keybase-type invite in %s for %s", team.Name(), uid)
+
+	// Remove all invites with given UID, so we don't have to worry
+	// about old teams that might have duplicates. Having to remove
+	// more than one should be rare because we do not allow adding
+	// duplicate pukless/crypto memberships anymore, and client tries
+	// to always remove old versions of memberships.
+
+	var toRemove []keybase1.TeamInviteID
+	allInvites := team.GetActiveAndObsoleteInvites()
+	for _, invite := range allInvites {
+		if inviteUv, err := invite.KeybaseUserVersion(); err == nil {
+			if inviteUv.Uid.Equal(uid) {
+				g.Log.CDebugf(ctx, "found keybase-type invite %s for %s, removing", invite.Id, invite.Name)
+				toRemove = append(toRemove, invite.Id)
+			}
+		}
+	}
+
+	if len(toRemove) > 0 {
+		g.Log.CDebugf(ctx, "found %d keybase-type invites for %s, trying to post remove invite link",
+			len(toRemove), uid)
+		return removeMultipleInviteIDs(ctx, team, toRemove)
+	}
+
+	g.Log.CDebugf(ctx, "no keybase-invites found to remove %s", uid)
+	return libkb.NotFoundError{}
+}
+
 func removeMultipleInviteIDs(ctx context.Context, team *Team, invIDs []keybase1.TeamInviteID) error {
 	var cancelList []SCTeamInviteID
 	for _, invID := range invIDs {
@@ -1247,6 +1284,7 @@ func CanUserPerform(ctx context.Context, g *libkb.GlobalContext, teamname string
 		Name:    teamname,
 		StaleOK: true,
 		Public:  false, // assume private team
+		AllowNameLookupBurstCache: true,
 	})
 	if err != nil {
 		// Note: we eat the error here, assuming it meant this user
@@ -1350,7 +1388,8 @@ func CanUserPerform(ctx context.Context, g *libkb.GlobalContext, teamname string
 		ret.LeaveTeam = leaveTeam
 	}
 
-	ret.CreateChannel = isWriter()
+	writer := isWriter()
+	ret.CreateChannel = writer
 
 	ret.SetMemberShowcase, err = canMemberShowcase()
 	if err != nil {
@@ -1358,9 +1397,11 @@ func CanUserPerform(ctx context.Context, g *libkb.GlobalContext, teamname string
 	}
 
 	ret.DeleteChannel = admin
-	ret.RenameChannel = isWriter()
-	ret.EditChannelDescription = isWriter()
+	ret.RenameChannel = writer
+	ret.EditChannelDescription = writer
 	ret.DeleteChatHistory = admin
+	ret.SetRetentionPolicy = admin
+	ret.Chat = isRoleOrAbove(keybase1.TeamRole_READER)
 
 	return ret, err
 }
@@ -1432,13 +1473,19 @@ func (c *disableTARsRes) GetAppStatus() *libkb.AppStatus {
 }
 
 func GetTarsDisabled(ctx context.Context, g *libkb.GlobalContext, teamname string) (bool, error) {
-	t, err := GetForTeamManagementByStringName(ctx, g, teamname, true)
+
+	nameParsed, err := keybase1.TeamNameFromString(teamname)
+	if err != nil {
+		return false, err
+	}
+
+	id, err := g.GetTeamLoader().ResolveNameToIDUntrusted(ctx, nameParsed, false, true)
 	if err != nil {
 		return false, err
 	}
 
 	arg := apiArg(ctx, "team/disable_tars")
-	arg.Args.Add("tid", libkb.S{Val: t.ID.String()})
+	arg.Args.Add("tid", libkb.S{Val: id.String()})
 	var ret disableTARsRes
 	if err := g.API.GetDecode(arg, &ret); err != nil {
 		return false, err

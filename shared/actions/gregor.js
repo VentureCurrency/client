@@ -1,17 +1,17 @@
 // @flow
 import logger from '../logger'
+import {Set} from 'immutable'
 import * as ConfigGen from './config-gen'
 import * as Types from '../constants/types/gregor'
 import * as FavoriteGen from './favorite-gen'
 import * as GitGen from './git-gen'
 import * as GregorGen from './gregor-gen'
-import * as I from 'immutable'
+import * as TeamsGen from './teams-gen'
 import * as RPCTypes from '../constants/types/rpc-gen'
 import * as Saga from '../util/saga'
 import engine from '../engine'
 import {folderFromPath} from '../constants/favorite.js'
 import {nativeReachabilityEvents} from '../util/reachability'
-import {replaceEntity} from './entities'
 import {type Dispatch} from '../constants/types/flux'
 import {type State as GregorState, type OutOfBandMessage} from '../constants/types/rpc-gregor-gen'
 import {type TypedState} from '../constants/reducer'
@@ -118,17 +118,24 @@ function* handleTLFUpdate(items: Array<Types.NonNullGregorItem>): Saga.SagaGener
   }
 }
 
-function* handleIntroBanners(items: Array<Types.NonNullGregorItem>): Saga.SagaGenerator<any, any> {
+function* handleBannersAndBadges(items: Array<Types.NonNullGregorItem>): Saga.SagaGenerator<any, any> {
   const sawChatBanner = items.find(i => i.item && i.item.category === 'sawChatBanner')
-  const sawSubteamsBanner = items.find(i => i.item && i.item.category === 'sawSubteamsBanner')
   if (sawChatBanner) {
-    // TODO move this to teams eventually
-    yield Saga.put(replaceEntity(['teams'], I.Map([['sawChatBanner', true]])))
+    yield Saga.put(TeamsGen.createSetTeamSawChatBanner())
   }
+
+  const sawSubteamsBanner = items.find(i => i.item && i.item.category === 'sawSubteamsBanner')
   if (sawSubteamsBanner) {
-    // TODO move this to teams eventually
-    yield Saga.put(replaceEntity(['teams'], I.Map([['sawSubteamsBanner', true]])))
+    yield Saga.put(TeamsGen.createSetTeamSawSubteamsBanner())
   }
+
+  const chosenChannels = items.find(i => i.item && i.item.category === 'chosenChannelsForTeam')
+  const teamsWithChosenChannelsStr =
+    chosenChannels && chosenChannels.item && chosenChannels.item.body && chosenChannels.item.body.toString()
+  const teamsWithChosenChannels = teamsWithChosenChannelsStr
+    ? Set(JSON.parse(teamsWithChosenChannelsStr))
+    : Set()
+  yield Saga.put(TeamsGen.createSetTeamsWithChosenChannels({teamsWithChosenChannels}))
 }
 
 function _handlePushState(pushAction: GregorGen.PushStatePayload) {
@@ -141,7 +148,7 @@ function _handlePushState(pushAction: GregorGen.PushStatePayload) {
 
     return Saga.sequentially([
       Saga.call(handleTLFUpdate, nonNullItems),
-      Saga.call(handleIntroBanners, nonNullItems),
+      Saga.call(handleBannersAndBadges, nonNullItems),
     ])
   } else {
     logger.debug('Error in gregor pushState', pushAction.payload)

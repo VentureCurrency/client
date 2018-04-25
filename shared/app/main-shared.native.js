@@ -2,13 +2,15 @@
 import * as ConfigGen from '../actions/config-gen'
 import * as NotificationsGen from '../actions/notifications-gen'
 import Push from './push/push.native'
-import React, {Component} from 'react'
+import React, {Component, Fragment} from 'react'
 import RenderRoute from '../route-tree/render-route'
 import loadPerf from '../util/load-perf'
 import hello from '../util/hello'
 import {connect, type TypedState} from '../util/container'
-import debounce from 'lodash/debounce'
+import {debounce} from 'lodash-es'
 import {navigateUp, setRouteState} from '../actions/route-tree'
+import {GatewayDest} from 'react-gateway'
+import {View} from 'react-native'
 
 type Props = {
   folderBadge: number,
@@ -47,8 +49,8 @@ class Main extends Component<any> {
     this.props.persistRouteState()
   }, 200)
 
-  componentWillReceiveProps(nextProps: Props) {
-    if (this.props.routeState !== nextProps.routeState) {
+  componentDidUpdate(prevProps: Props) {
+    if (this.props.routeState !== prevProps.routeState) {
       this._persistRoute()
     }
   }
@@ -60,11 +62,14 @@ class Main extends Component<any> {
     }
 
     return (
-      <RenderRoute
-        routeDef={this.props.routeDef}
-        routeState={this.props.routeState}
-        setRouteState={this.props.setRouteState}
-      />
+      <Fragment>
+        <RenderRoute
+          routeDef={this.props.routeDef}
+          routeState={this.props.routeState}
+          setRouteState={this.props.setRouteState}
+        />
+        <GatewayDest name="popup-root" component={View} />
+      </Fragment>
     )
   }
 }

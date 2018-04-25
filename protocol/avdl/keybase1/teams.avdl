@@ -100,11 +100,6 @@ protocol teams {
     TeamShowcase showcase;
   }
 
-  record UserVersion {
-    UID uid;
-    Seqno eldestSeqno;
-  }
-
   @typedef("string")
   record UserVersionPercentForm {}
 
@@ -312,7 +307,7 @@ protocol teams {
   record UserLogPoint {
     // The new role. Including NONE if the user left the team.
     TeamRole role;
-    // The seqno at which the user became this role, and other imporant
+    // The seqno at which the user became this role, and other important
     // details, like the last known MerkleRoot at that time.
     SignatureMetadata sigMeta;
   }
@@ -333,6 +328,16 @@ protocol teams {
     array<TeamNamePart> parts;
   }
 
+  // Sometimes during CLKR server will hint us that users are reset.
+  @lint("ignore")
+  record TeamCLKRResetUser {
+    UID uid;
+    @jsonkey("user_eldest")
+    Seqno userEldestSeqno;
+    @jsonkey("member_eldest")
+    Seqno memberEldestSeqno;
+  }
+
   // team.clkr gregor message body
   @lint("ignore")
   record TeamCLKRMsg {
@@ -340,6 +345,8 @@ protocol teams {
     TeamID teamID;
     PerTeamKeyGeneration generation;
     int score;
+    @jsonkey("reset_users")
+    array<TeamCLKRResetUser> resetUsersUntrusted;
   }
 
   record TeamResetUser {
@@ -528,9 +535,10 @@ protocol teams {
 
     TeamRefreshers refreshers;
 
-    boolean forceFullReload;      // Ignore local data and fetch from the server.
-    boolean forceRepoll;          // Force a sync with merkle.
-    boolean staleOK;              // If a very stale cache hit is OK.
+    boolean forceFullReload;           // Ignore local data and fetch from the server.
+    boolean forceRepoll;               // Force a sync with merkle.
+    boolean staleOK;                   // If a very stale cache hit is OK.
+    boolean allowNameLookupBurstCache; // If it's ok to hit the nameLookup burst cache
   }
 
   record ImplicitRole {
@@ -553,6 +561,10 @@ protocol teams {
     union{null, ImplicitRole} implicit;
     @jsonkey("member_count")
     int memberCount;
+    @jsonkey("allow_profile_promote")
+    boolean allowProfilePromote;
+    @jsonkey("is_member_showcased")
+    boolean isMemberShowcased;
   }
 
   record TeamList {
@@ -582,6 +594,10 @@ protocol teams {
     @jsonkey("member_eldest_seqno")
     Seqno eldestSeqno;
     boolean active;
+    @jsonkey("allow_profile_promote")
+    boolean allowProfilePromote;
+    @jsonkey("is_member_showcased")
+    boolean isMemberShowcased;
   }
 
   record AnnotatedTeamList {
@@ -697,7 +713,7 @@ protocol teams {
   // Accept an invite or request to join a team, try both.
   TeamAcceptOrRequestResult teamAcceptInviteOrRequestAccess(int sessionID, string tokenOrName);
 
-  array<TeamJoinRequest> teamListRequests(int sessionID);
+  array<TeamJoinRequest> teamListRequests(int sessionID, union { null, string } teamName);
 
   // List TeamAccessRequests from current user. Optionally can provide
   // a teamname, and API server will only return request for that team,
@@ -782,11 +798,13 @@ protocol teams {
     boolean manageMembers;
     boolean manageSubteams;
     boolean createChannel;
+    boolean chat;
     boolean deleteChannel;
     boolean renameChannel;
     boolean editChannelDescription;
     boolean setTeamShowcase;
     boolean setMemberShowcase;
+    boolean setRetentionPolicy;
     boolean changeOpenTeam;
     boolean leaveTeam;
     boolean joinTeam;

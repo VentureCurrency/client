@@ -16,12 +16,13 @@
 #import <keybase/keybase.h>
 
 // Systrace is busted due to the new bridge. Uncomment this to force the old bridge.
-// You'll also have to edit the React.xcodeproj. Intructions here:
+// You'll also have to edit the React.xcodeproj. Instructions here:
 // https://github.com/facebook/react-native/issues/15003#issuecomment-323715121
 //#define SYSTRACING
 
 @interface AppDelegate ()
 @property UIBackgroundTaskIdentifier backgroundTask;
+@property UIBackgroundTaskIdentifier shutdownTask;
 @end
 
 #if TARGET_OS_SIMULATOR
@@ -130,7 +131,6 @@ const BOOL isDebug = NO;
   //
   // jsCodeLocation = [NSURL URLWithString:@"http://localhost:8081/index.ios.bundle?platform=ios&dev=false"];
   jsCodeLocation = [[RCTBundleURLProvider sharedSettings] jsBundleURLForBundleRoot:@"index.ios" fallbackResource:nil];
-
 #ifdef SYSTRACING
   RCTBridge *bridge = [[RCTBridge alloc] initWithDelegate:self
                                             launchOptions:launchOptions];
@@ -204,6 +204,7 @@ const BOOL isDebug = NO;
 
 - (void)applicationWillTerminate:(UIApplication *)application {
   self.window.rootViewController.view.hidden = YES;
+  KeybaseAppWillExit();
 }
 
 - (void) hideCover {
@@ -221,6 +222,7 @@ const BOOL isDebug = NO;
   [UIView animateWithDuration:0.3 delay:0.1 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
     self.resignImageView.alpha = 1;
   } completion:nil];
+  KeybaseSetAppStateInactive();
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
@@ -230,15 +232,48 @@ const BOOL isDebug = NO;
   [self.resignImageView.layer removeAllAnimations];
   // Snapshot happens right after this call, force alpha immediately w/o animation else you'll get a half animated overlay
   self.resignImageView.alpha = 1;
+  
+  const bool requestTime = KeybaseAppDidEnterBackground();
+  if (requestTime && (!self.shutdownTask || self.shutdownTask == UIBackgroundTaskInvalid)) {
+    UIApplication *app = [UIApplication sharedApplication];
+    self.shutdownTask = [app beginBackgroundTaskWithExpirationHandler:^{
+      KeybaseAppWillExit();
+      [app endBackgroundTask:self.shutdownTask];
+      self.shutdownTask = UIBackgroundTaskInvalid;
+    }];
+  }
 }
 
 // Sometimes these lifecycle calls can be skipped so try and catch them all
 - (void)applicationDidBecomeActive:(UIApplication *)application {
   [self hideCover];
+  [self notifyAppState:application];
 }
 
 - (void)applicationWillEnterForeground:(UIApplication *)application {
   [self hideCover];
+}
+
+- (void)applicationDidFinishLaunching:(UIApplication *)application {
+  [self notifyAppState:application];
+}
+
+- (void)notifyAppState:(UIApplication *)application {
+  const UIApplicationState state = application.applicationState;
+  switch (state) {
+    case UIApplicationStateActive:
+      KeybaseSetAppStateForeground();
+      break;
+    case UIApplicationStateBackground:
+      KeybaseSetAppStateBackground();
+      break;
+    case UIApplicationStateInactive:
+      KeybaseSetAppStateInactive();
+      break;
+    default:
+      KeybaseSetAppStateForeground();
+      break;
+  }
 }
 
 - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url

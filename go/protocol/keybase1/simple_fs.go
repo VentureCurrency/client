@@ -152,18 +152,20 @@ func (e DirentType) String() string {
 }
 
 type Dirent struct {
-	Time       Time       `codec:"time" json:"time"`
-	Size       int        `codec:"size" json:"size"`
-	Name       string     `codec:"name" json:"name"`
-	DirentType DirentType `codec:"direntType" json:"direntType"`
+	Time                 Time       `codec:"time" json:"time"`
+	Size                 int        `codec:"size" json:"size"`
+	Name                 string     `codec:"name" json:"name"`
+	DirentType           DirentType `codec:"direntType" json:"direntType"`
+	LastWriterUnverified User       `codec:"lastWriterUnverified" json:"lastWriterUnverified"`
 }
 
 func (o Dirent) DeepCopy() Dirent {
 	return Dirent{
-		Time:       o.Time.DeepCopy(),
-		Size:       o.Size,
-		Name:       o.Name,
-		DirentType: o.DirentType.DeepCopy(),
+		Time:                 o.Time.DeepCopy(),
+		Size:                 o.Size,
+		Name:                 o.Name,
+		DirentType:           o.DirentType.DeepCopy(),
+		LastWriterUnverified: o.LastWriterUnverified.DeepCopy(),
 	}
 }
 
@@ -297,15 +299,43 @@ func (e AsyncOps) String() string {
 	return ""
 }
 
+type ListFilter int
+
+const (
+	ListFilter_NO_FILTER         ListFilter = 0
+	ListFilter_FILTER_ALL_HIDDEN ListFilter = 1
+)
+
+func (o ListFilter) DeepCopy() ListFilter { return o }
+
+var ListFilterMap = map[string]ListFilter{
+	"NO_FILTER":         0,
+	"FILTER_ALL_HIDDEN": 1,
+}
+
+var ListFilterRevMap = map[ListFilter]string{
+	0: "NO_FILTER",
+	1: "FILTER_ALL_HIDDEN",
+}
+
+func (e ListFilter) String() string {
+	if v, ok := ListFilterRevMap[e]; ok {
+		return v
+	}
+	return ""
+}
+
 type ListArgs struct {
-	OpID OpID `codec:"opID" json:"opID"`
-	Path Path `codec:"path" json:"path"`
+	OpID   OpID       `codec:"opID" json:"opID"`
+	Path   Path       `codec:"path" json:"path"`
+	Filter ListFilter `codec:"filter" json:"filter"`
 }
 
 func (o ListArgs) DeepCopy() ListArgs {
 	return ListArgs{
-		OpID: o.OpID.DeepCopy(),
-		Path: o.Path.DeepCopy(),
+		OpID:   o.OpID.DeepCopy(),
+		Path:   o.Path.DeepCopy(),
+		Filter: o.Filter.DeepCopy(),
 	}
 }
 
@@ -632,13 +662,15 @@ func (o OpProgress) DeepCopy() OpProgress {
 }
 
 type SimpleFSListArg struct {
-	OpID OpID `codec:"opID" json:"opID"`
-	Path Path `codec:"path" json:"path"`
+	OpID   OpID       `codec:"opID" json:"opID"`
+	Path   Path       `codec:"path" json:"path"`
+	Filter ListFilter `codec:"filter" json:"filter"`
 }
 
 type SimpleFSListRecursiveArg struct {
-	OpID OpID `codec:"opID" json:"opID"`
-	Path Path `codec:"path" json:"path"`
+	OpID   OpID       `codec:"opID" json:"opID"`
+	Path   Path       `codec:"path" json:"path"`
+	Filter ListFilter `codec:"filter" json:"filter"`
 }
 
 type SimpleFSReadListArg struct {
@@ -722,6 +754,12 @@ type SimpleFSWaitArg struct {
 	OpID OpID `codec:"opID" json:"opID"`
 }
 
+type SimpleFSDumpDebuggingInfoArg struct {
+}
+
+type SimpleFSSyncStatusArg struct {
+}
+
 type SimpleFSInterface interface {
 	// Begin list of items in directory at path
 	// Retrieve results with readList()
@@ -771,6 +809,10 @@ type SimpleFSInterface interface {
 	SimpleFSGetOps(context.Context) ([]OpDescription, error)
 	// Blocking wait for the pending operation to finish
 	SimpleFSWait(context.Context, OpID) error
+	// Instructs KBFS to dump debugging info into its logs.
+	SimpleFSDumpDebuggingInfo(context.Context) error
+	// Get sync status.
+	SimpleFSSyncStatus(context.Context) (FSSyncStatus, error)
 }
 
 func SimpleFSProtocol(i SimpleFSInterface) rpc.Protocol {
@@ -1071,6 +1113,28 @@ func SimpleFSProtocol(i SimpleFSInterface) rpc.Protocol {
 				},
 				MethodType: rpc.MethodCall,
 			},
+			"simpleFSDumpDebuggingInfo": {
+				MakeArg: func() interface{} {
+					ret := make([]SimpleFSDumpDebuggingInfoArg, 1)
+					return &ret
+				},
+				Handler: func(ctx context.Context, args interface{}) (ret interface{}, err error) {
+					err = i.SimpleFSDumpDebuggingInfo(ctx)
+					return
+				},
+				MethodType: rpc.MethodCall,
+			},
+			"simpleFSSyncStatus": {
+				MakeArg: func() interface{} {
+					ret := make([]SimpleFSSyncStatusArg, 1)
+					return &ret
+				},
+				Handler: func(ctx context.Context, args interface{}) (ret interface{}, err error) {
+					ret, err = i.SimpleFSSyncStatus(ctx)
+					return
+				},
+				MethodType: rpc.MethodCall,
+			},
 		},
 	}
 }
@@ -1206,5 +1270,17 @@ func (c SimpleFSClient) SimpleFSGetOps(ctx context.Context) (res []OpDescription
 func (c SimpleFSClient) SimpleFSWait(ctx context.Context, opID OpID) (err error) {
 	__arg := SimpleFSWaitArg{OpID: opID}
 	err = c.Cli.Call(ctx, "keybase.1.SimpleFS.simpleFSWait", []interface{}{__arg}, nil)
+	return
+}
+
+// Instructs KBFS to dump debugging info into its logs.
+func (c SimpleFSClient) SimpleFSDumpDebuggingInfo(ctx context.Context) (err error) {
+	err = c.Cli.Call(ctx, "keybase.1.SimpleFS.simpleFSDumpDebuggingInfo", []interface{}{SimpleFSDumpDebuggingInfoArg{}}, nil)
+	return
+}
+
+// Get sync status.
+func (c SimpleFSClient) SimpleFSSyncStatus(ctx context.Context) (res FSSyncStatus, err error) {
+	err = c.Cli.Call(ctx, "keybase.1.SimpleFS.simpleFSSyncStatus", []interface{}{SimpleFSSyncStatusArg{}}, &res)
 	return
 }

@@ -132,6 +132,10 @@
             "items": "OutboxRecord"
           },
           "name": "outboxRecords"
+        },
+        {
+          "type": "boolean",
+          "name": "isEphemeralPurge"
         }
       ]
     },
@@ -185,13 +189,6 @@
         {
           "type": "Expunge",
           "name": "expunge"
-        },
-        {
-          "type": [
-            null,
-            "InboxUIItem"
-          ],
-          "name": "conv"
         }
       ]
     },

@@ -15,12 +15,13 @@ const mapStateToProps = (state: TypedState, {teamname}: OwnProps) => {
   const yourOperations = Constants.getCanPerform(state, teamname)
   return {
     _you: state.config.username,
+    canChat: yourOperations.chat,
     canEditDescription: yourOperations.editChannelDescription,
     canJoinTeam: yourOperations.joinTeam,
     canManageMembers: yourOperations.manageMembers,
-    description: state.entities.getIn(['teams', 'teamNameToPublicitySettings', teamname, 'description'], ''),
-    memberCount: state.entities.getIn(['teams', 'teammembercounts', teamname], 0),
-    openTeam: state.entities.getIn(['teams', 'teamNameToTeamSettings', teamname, 'open'], false),
+    description: Constants.getTeamPublicitySettings(state, teamname).description,
+    memberCount: Constants.getTeamMemberCount(state, teamname),
+    openTeam: Constants.getTeamSettings(state, teamname).open,
     role: Constants.getRole(state, teamname),
   }
 }
@@ -47,6 +48,7 @@ const mapDispatchToProps = (dispatch: Dispatch, {teamname}: OwnProps) => ({
 })
 
 const mergeProps = (stateProps, dispatchProps, ownProps) => ({
+  canChat: stateProps.canChat,
   canEditDescription: stateProps.canEditDescription,
   canJoinTeam: stateProps.canJoinTeam,
   canManageMembers: stateProps.canManageMembers,

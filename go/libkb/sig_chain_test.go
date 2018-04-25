@@ -111,7 +111,7 @@ type TestList struct {
 	ErrorTypes []string            `json:"error_types"`
 }
 
-// The input data for a single test. Each tests has its own input JSON file.
+// The input data for a single test. Each test has its own input JSON file.
 type TestInput struct {
 	// We omit the "chain" member here, because we need it in blob form.
 	Username  string            `json:"username"`
@@ -348,6 +348,8 @@ func storeAndLoad(t *testing.T, tc TestContext, chain *SigChain) {
 	sgl.chain = nil
 	sgl.dirtyTail = nil
 	var sc2 *SigChain
+	// Reset the link cache so that we're sure our loads hits storage.
+	tc.G.LinkCache = NewLinkCache(1000, time.Hour)
 	sc2, err = sgl.Load()
 	if err != nil {
 		t.Fatal(err)

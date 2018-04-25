@@ -219,13 +219,14 @@ func (g *gregorHandler) Init() {
 
 func (g *gregorHandler) monitorAppState() {
 	// Wait for state updates and react accordingly
+	state := keybase1.AppState_FOREGROUND
 	for {
-		state := <-g.G().AppState.NextUpdate()
+		state = <-g.G().AppState.NextUpdate(&state)
 		switch state {
 		case keybase1.AppState_BACKGROUNDACTIVE:
 			fallthrough
 		case keybase1.AppState_FOREGROUND:
-			// Make sure the URI is set before attempting this (possible it isnt in a race)
+			// Make sure the URI is set before attempting this (possible it isn't in a race)
 			if g.uri != nil {
 				g.chatLog.Debug(context.Background(), "foregrounded, reconnecting")
 				if err := g.Connect(g.uri); err != nil {
@@ -391,12 +392,13 @@ func (g *gregorHandler) HandlerName() string {
 // when an external entity (like Electron) connects to the service, and we can
 // safely send Gregor information to it
 func (g *gregorHandler) PushHandler(handler libkb.GregorInBandMessageHandler) {
-	g.Lock()
-	defer g.Unlock()
+	defer g.chatLog.Trace(context.Background(), func() error { return nil }, "PushHandler")()
 
 	g.G().Log.Debug("pushing inband handler %s to position %d", handler.Name(), len(g.ibmHandlers))
 
+	g.Lock()
 	g.ibmHandlers = append(g.ibmHandlers, handler)
+	g.Unlock()
 
 	// Only try replaying if we are logged in, it's possible that a handler can
 	// attach before that is true (like if we start the service logged out and
@@ -423,9 +425,10 @@ func (g *gregorHandler) PushHandler(handler libkb.GregorInBandMessageHandler) {
 // get the "firehose" of gregor events. They're removed lazily as their underlying
 // connections die.
 func (g *gregorHandler) PushFirehoseHandler(handler libkb.GregorFirehoseHandler) {
+	defer g.chatLog.Trace(context.Background(), func() error { return nil }, "PushFirehoseHandler")()
 	g.Lock()
-	defer g.Unlock()
 	g.firehoseHandlers = append(g.firehoseHandlers, handler)
+	g.Unlock()
 
 	s, err := g.getState(context.Background())
 	if err != nil {
@@ -435,7 +438,7 @@ func (g *gregorHandler) PushFirehoseHandler(handler libkb.GregorFirehoseHandler)
 	handler.PushState(s, keybase1.PushReason_RECONNECTED)
 }
 
-// iterateOverFirehoseHandlers applies the function f to all live fireshose handlers
+// iterateOverFirehoseHandlers applies the function f to all live firehose handlers
 // and then resets the list to only include the live ones.
 func (g *gregorHandler) iterateOverFirehoseHandlers(f func(h libkb.GregorFirehoseHandler)) {
 	var freshHandlers []libkb.GregorFirehoseHandler
@@ -531,6 +534,7 @@ func (g *gregorHandler) IsShutdown() bool {
 }
 
 func (g *gregorHandler) IsConnected() bool {
+	defer g.chatLog.Trace(context.Background(), func() error { return nil }, "IsConnected")()
 	g.connMutex.Lock()
 	defer g.connMutex.Unlock()
 	return g.conn != nil && g.conn.IsConnected()
@@ -633,23 +637,22 @@ func (g *gregorHandler) notificationParams(ctx context.Context, gcli *grclient.C
 // OnConnect is called by the rpc library to indicate we have connected to
 // gregord
 func (g *gregorHandler) OnConnect(ctx context.Context, conn *rpc.Connection,
-	cli rpc.GenericClient, srv *rpc.Server) error {
+	cli rpc.GenericClient, srv *rpc.Server) (err error) {
+	defer g.chatLog.Trace(ctx, func() error { return err }, "OnConnect")()
 
 	// If we get a random OnConnect on some other connection that is not g.conn, then
 	// just reject it.
 	g.connMutex.Lock()
 	if conn != g.conn {
 		g.connMutex.Unlock()
+		g.chatLog.Debug(ctx, "aborting on dup connection")
 		return chat.ErrDuplicateConnection
 	}
 	g.connMutex.Unlock()
 
-	g.Lock()
-	defer g.Unlock()
+	g.chatLog.Debug(ctx, "connected")
 	timeoutCli := WrapGenericClientWithTimeout(cli, GregorRequestTimeout, chat.ErrChatServerTimeout)
 	chatCli := chat1.RemoteClient{Cli: chat.NewRemoteClient(g.G(), cli)}
-
-	g.chatLog.Debug(ctx, "connected")
 	if err := srv.Register(gregor1.OutgoingProtocol(g)); err != nil {
 		return fmt.Errorf("error registering protocol: %s", err.Error())
 	}
@@ -798,9 +801,8 @@ func (g *gregorHandler) ShouldRetryOnConnect(err error) bool {
 	return true
 }
 
-func (g *gregorHandler) broadcastMessageOnce(ctx context.Context, m gregor1.Message) error {
-	g.Lock()
-	defer g.Unlock()
+func (g *gregorHandler) broadcastMessageOnce(ctx context.Context, m gregor1.Message) (err error) {
+	defer g.chatLog.Trace(ctx, func() error { return err }, "broadcastMessageOnce")()
 
 	// Handle the message
 	var obm gregor.OutOfBandMessage
@@ -873,7 +875,7 @@ func (g *gregorHandler) broadcastMessageHandler() {
 	}
 }
 
-// BroadcastMessage is called when we receive a new messages from gregord. Grabs
+// BroadcastMessage is called when we receive a new message from gregord. Grabs
 // the lock protect the state machine and handleInBandMessage
 func (g *gregorHandler) BroadcastMessage(ctx context.Context, m gregor1.Message) error {
 	// Send the message on a channel so we can return to Gregor as fast as possible. Note
@@ -1149,7 +1151,7 @@ func (g *gregorHandler) handleOutOfBandMessage(ctx context.Context, obm gregor.O
 }
 
 func (g *gregorHandler) Shutdown() {
-	g.Debug(context.Background(), "shutdown")
+	defer g.chatLog.Trace(context.Background(), func() error { return nil }, "Shutdown")()
 	g.connMutex.Lock()
 	defer g.connMutex.Unlock()
 
@@ -1212,7 +1214,7 @@ const (
 
 func (g *gregorHandler) loggedIn(ctx context.Context) (uid keybase1.UID, token string, res loggedInRes) {
 
-	// Check to see if we have been shutdown,
+	// Check to see if we have been shut down,
 	select {
 	case <-g.shutdownCh:
 		return uid, token, loggedInMaybe
@@ -1220,26 +1222,17 @@ func (g *gregorHandler) loggedIn(ctx context.Context) (uid keybase1.UID, token s
 		// if we were going to block, then that means we are still alive
 	}
 
-	// Continue on and authenticate
-	g.G().Log.Debug("gregorHandler forceSessionCheck: %v", g.forceSessionCheck)
-	status, err := g.G().LoginState().APIServerSession(g.forceSessionCheck)
-	if err != nil {
-		switch err.(type) {
-		case libkb.LoginRequiredError:
-			return uid, token, loggedInNo
-		case libkb.NoSessionError:
-			return uid, token, loggedInNo
-		default:
-			g.G().Log.Debug("gregorHandler APIServerSessionStatus error (%T): %s", err, err)
-		}
-		g.G().Log.Debug("gregorHandler APIServerSessionStatus error: %s (returning loggedInMaybe)", err)
-		return uid, token, loggedInMaybe
-	}
-	if status == nil {
+	nist, uid, err := g.G().ActiveDevice.NISTAndUID(ctx)
+	if nist == nil {
+		g.G().Log.CDebugf(ctx, "gregorHandler: no NIST for login; user isn't logged in")
 		return uid, token, loggedInNo
 	}
+	if err != nil {
+		g.G().Log.CDebugf(ctx, "gregorHandler: error in generating NIST: %s", err.Error())
+		return uid, token, loggedInMaybe
+	}
 
-	return status.UID, status.SessionToken, loggedInYes
+	return uid, nist.Token().String(), loggedInYes
 }
 
 func (g *gregorHandler) auth(ctx context.Context, cli rpc.GenericClient, auth *gregor1.AuthResult) (err error) {
@@ -1486,7 +1479,7 @@ func (g *gregorHandler) connectTLS() error {
 	// We should grab it here instead of in OnConnect, since the connection is not
 	// fully established in OnConnect. Anything that wants to make calls outside
 	// of OnConnect should use g.cli, everything else should the client that is
-	// a paramater to OnConnect
+	// a parameter to OnConnect
 	g.cli = WrapGenericClientWithTimeout(g.conn.GetClient(), GregorRequestTimeout,
 		chat.ErrChatServerTimeout)
 	g.pingCli = g.conn.GetClient() // Don't want this to have a timeout from here
@@ -1515,7 +1508,7 @@ func (g *gregorHandler) connectNoTLS() error {
 		WrapErrorFunc:                 libkb.MakeWrapError(g.G().ExternalG()),
 		InitialReconnectBackoffWindow: func() time.Duration { return g.chatAwareInitialReconnectBackoffWindow(ctx) },
 		ReconnectBackoff:              func() backoff.BackOff { return g.chatAwareReconnectBackoff(ctx) },
-		// We deliberately avoid ForceInitialBackoff here, becuase we don't
+		// We deliberately avoid ForceInitialBackoff here, because we don't
 		// want to penalize mobile, which tears down its connection frequently.
 	}
 	g.conn = rpc.NewConnectionWithTransport(g, t,

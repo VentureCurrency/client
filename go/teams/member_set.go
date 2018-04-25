@@ -13,6 +13,8 @@ type member struct {
 	perUserKey keybase1.PerUserKey
 }
 
+type MemberMap map[keybase1.UserVersion]keybase1.PerUserKey
+
 type memberSet struct {
 	Owners  []member
 	Admins  []member
@@ -21,11 +23,11 @@ type memberSet struct {
 	None    []member
 
 	// the per-user-keys of everyone in the lists above
-	recipients map[keybase1.UserVersion]keybase1.PerUserKey
+	recipients MemberMap
 }
 
 func newMemberSet() *memberSet {
-	return &memberSet{recipients: make(map[keybase1.UserVersion]keybase1.PerUserKey)}
+	return &memberSet{recipients: make(MemberMap)}
 }
 
 func newMemberSetChange(ctx context.Context, g *libkb.GlobalContext, req keybase1.TeamChangeReq) (*memberSet, error) {
@@ -34,6 +36,14 @@ func newMemberSetChange(ctx context.Context, g *libkb.GlobalContext, req keybase
 		return nil, err
 	}
 	return set, nil
+}
+
+func (m *memberSet) recipientUids() []keybase1.UID {
+	uids := make([]keybase1.UID, 0, len(m.recipients))
+	for uv := range m.recipients {
+		uids = append(uids, uv.Uid)
+	}
+	return uids
 }
 
 func (m *memberSet) appendMemberSet(other *memberSet) {
@@ -55,8 +65,8 @@ func (m *memberSet) nonAdmins() []member {
 	return ret
 }
 
-func (m *memberSet) adminAndOwnerRecipients() map[keybase1.UserVersion]keybase1.PerUserKey {
-	ret := map[keybase1.UserVersion]keybase1.PerUserKey{}
+func (m *memberSet) adminAndOwnerRecipients() MemberMap {
+	ret := MemberMap{}
 	for _, owner := range m.Owners {
 		ret[owner.version] = owner.perUserKey
 	}
@@ -98,7 +108,7 @@ func (m *memberSet) loadGroup(ctx context.Context, g *libkb.GlobalContext,
 			if !storeRecipient {
 				// If caller doesn't care about keys, it probably expects
 				// reset users to be passed through as well. This is used
-				// in readding reset users in impteams.
+				// in reading reset users in impteams.
 				members = append(members, member{version: uv})
 			} else {
 				g.Log.CDebugf(ctx, "Skipping reset account %s in team load", uv.String())
@@ -187,23 +197,32 @@ func (m *memberSet) removeExistingMembers(ctx context.Context, checker MemberChe
 }
 
 // AddRemainingRecipients adds everyone in existing to m.recipients that isn't in m.None.
-func (m *memberSet) AddRemainingRecipients(ctx context.Context, g *libkb.GlobalContext, existing keybase1.TeamMembers) error {
+func (m *memberSet) AddRemainingRecipients(ctx context.Context, g *libkb.GlobalContext, existing keybase1.TeamMembers) (err error) {
+
+	defer g.CTrace(ctx, "memberSet#AddRemainingRecipients", func() error { return err })()
+
 	// make a map of the None members
 	noneMap := make(map[keybase1.UserVersion]bool)
 	for _, n := range m.None {
 		noneMap[n.version] = true
 	}
 
-	for _, uv := range existing.AllUserVersions() {
+	auv := existing.AllUserVersions()
+	forceUserPoll := true
+	if len(auv) > 50 {
+		forceUserPoll = false
+	}
+
+	for _, uv := range auv {
 		if noneMap[uv] {
 			continue
 		}
 		if _, ok := m.recipients[uv]; ok {
 			continue
 		}
-		if _, err := m.loadMember(ctx, g, uv, true, true); err != nil {
+		if _, err := m.loadMember(ctx, g, uv, true, forceUserPoll); err != nil {
 			if _, reset := err.(libkb.AccountResetError); reset {
-				g.Log.CDebugf(ctx, "Skipping user was who reset: %s", uv.String())
+				g.Log.CDebugf(ctx, "Skipping user who was reset: %s", uv.String())
 				continue
 			}
 			return err

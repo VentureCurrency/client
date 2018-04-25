@@ -3,7 +3,6 @@ import prettier from 'prettier'
 import path from 'path'
 import json5 from 'json5'
 import fs from 'fs'
-import isArray from 'lodash/isArray'
 
 type Payload = Object
 type ErrorPayload = {
@@ -87,11 +86,11 @@ function payloadKeys(p: Object) {
 
 function printPayload(p: Object) {
   return payloadKeys(p).length
-    ? '(payload: $ReadOnly<{' +
+    ? '(payload: $ReadOnly<{|' +
         payloadKeys(p)
-          .map(key => `${key}: ${isArray(p[key]) ? p[key].join(' | ') : p[key]}`)
+          .map(key => `${key}: ${Array.isArray(p[key]) ? p[key].join(' | ') : p[key]}`)
           .join(',\n') +
-        '}>)'
+        '|}>)'
     : '()'
 }
 

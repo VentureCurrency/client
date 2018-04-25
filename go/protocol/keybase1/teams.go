@@ -343,18 +343,6 @@ func (o TeamDetails) DeepCopy() TeamDetails {
 	}
 }
 
-type UserVersion struct {
-	Uid         UID   `codec:"uid" json:"uid"`
-	EldestSeqno Seqno `codec:"eldestSeqno" json:"eldestSeqno"`
-}
-
-func (o UserVersion) DeepCopy() UserVersion {
-	return UserVersion{
-		Uid:         o.Uid.DeepCopy(),
-		EldestSeqno: o.EldestSeqno.DeepCopy(),
-	}
-}
-
 type UserVersionPercentForm string
 
 func (o UserVersionPercentForm) DeepCopy() UserVersionPercentForm {
@@ -1048,10 +1036,25 @@ func (o TeamName) DeepCopy() TeamName {
 	}
 }
 
+type TeamCLKRResetUser struct {
+	Uid               UID   `codec:"uid" json:"uid"`
+	UserEldestSeqno   Seqno `codec:"userEldestSeqno" json:"user_eldest"`
+	MemberEldestSeqno Seqno `codec:"memberEldestSeqno" json:"member_eldest"`
+}
+
+func (o TeamCLKRResetUser) DeepCopy() TeamCLKRResetUser {
+	return TeamCLKRResetUser{
+		Uid:               o.Uid.DeepCopy(),
+		UserEldestSeqno:   o.UserEldestSeqno.DeepCopy(),
+		MemberEldestSeqno: o.MemberEldestSeqno.DeepCopy(),
+	}
+}
+
 type TeamCLKRMsg struct {
-	TeamID     TeamID               `codec:"teamID" json:"team_id"`
-	Generation PerTeamKeyGeneration `codec:"generation" json:"generation"`
-	Score      int                  `codec:"score" json:"score"`
+	TeamID              TeamID               `codec:"teamID" json:"team_id"`
+	Generation          PerTeamKeyGeneration `codec:"generation" json:"generation"`
+	Score               int                  `codec:"score" json:"score"`
+	ResetUsersUntrusted []TeamCLKRResetUser  `codec:"resetUsersUntrusted" json:"reset_users"`
 }
 
 func (o TeamCLKRMsg) DeepCopy() TeamCLKRMsg {
@@ -1059,6 +1062,17 @@ func (o TeamCLKRMsg) DeepCopy() TeamCLKRMsg {
 		TeamID:     o.TeamID.DeepCopy(),
 		Generation: o.Generation.DeepCopy(),
 		Score:      o.Score,
+		ResetUsersUntrusted: (func(x []TeamCLKRResetUser) []TeamCLKRResetUser {
+			if x == nil {
+				return nil
+			}
+			var ret []TeamCLKRResetUser
+			for _, v := range x {
+				vCopy := v.DeepCopy()
+				ret = append(ret, vCopy)
+			}
+			return ret
+		})(o.ResetUsersUntrusted),
 	}
 }
 
@@ -1520,28 +1534,30 @@ func (o TeamRefreshers) DeepCopy() TeamRefreshers {
 }
 
 type LoadTeamArg struct {
-	ID               TeamID         `codec:"ID" json:"ID"`
-	Name             string         `codec:"name" json:"name"`
-	Public           bool           `codec:"public" json:"public"`
-	NeedAdmin        bool           `codec:"needAdmin" json:"needAdmin"`
-	RefreshUIDMapper bool           `codec:"refreshUIDMapper" json:"refreshUIDMapper"`
-	Refreshers       TeamRefreshers `codec:"refreshers" json:"refreshers"`
-	ForceFullReload  bool           `codec:"forceFullReload" json:"forceFullReload"`
-	ForceRepoll      bool           `codec:"forceRepoll" json:"forceRepoll"`
-	StaleOK          bool           `codec:"staleOK" json:"staleOK"`
+	ID                        TeamID         `codec:"ID" json:"ID"`
+	Name                      string         `codec:"name" json:"name"`
+	Public                    bool           `codec:"public" json:"public"`
+	NeedAdmin                 bool           `codec:"needAdmin" json:"needAdmin"`
+	RefreshUIDMapper          bool           `codec:"refreshUIDMapper" json:"refreshUIDMapper"`
+	Refreshers                TeamRefreshers `codec:"refreshers" json:"refreshers"`
+	ForceFullReload           bool           `codec:"forceFullReload" json:"forceFullReload"`
+	ForceRepoll               bool           `codec:"forceRepoll" json:"forceRepoll"`
+	StaleOK                   bool           `codec:"staleOK" json:"staleOK"`
+	AllowNameLookupBurstCache bool           `codec:"allowNameLookupBurstCache" json:"allowNameLookupBurstCache"`
 }
 
 func (o LoadTeamArg) DeepCopy() LoadTeamArg {
 	return LoadTeamArg{
-		ID:               o.ID.DeepCopy(),
-		Name:             o.Name,
-		Public:           o.Public,
-		NeedAdmin:        o.NeedAdmin,
-		RefreshUIDMapper: o.RefreshUIDMapper,
-		Refreshers:       o.Refreshers.DeepCopy(),
-		ForceFullReload:  o.ForceFullReload,
-		ForceRepoll:      o.ForceRepoll,
-		StaleOK:          o.StaleOK,
+		ID:                        o.ID.DeepCopy(),
+		Name:                      o.Name,
+		Public:                    o.Public,
+		NeedAdmin:                 o.NeedAdmin,
+		RefreshUIDMapper:          o.RefreshUIDMapper,
+		Refreshers:                o.Refreshers.DeepCopy(),
+		ForceFullReload:           o.ForceFullReload,
+		ForceRepoll:               o.ForceRepoll,
+		StaleOK:                   o.StaleOK,
+		AllowNameLookupBurstCache: o.AllowNameLookupBurstCache,
 	}
 }
 
@@ -1558,14 +1574,16 @@ func (o ImplicitRole) DeepCopy() ImplicitRole {
 }
 
 type MemberInfo struct {
-	UserID         UID           `codec:"userID" json:"uid"`
-	TeamID         TeamID        `codec:"teamID" json:"team_id"`
-	FqName         string        `codec:"fqName" json:"fq_name"`
-	IsImplicitTeam bool          `codec:"isImplicitTeam" json:"is_implicit_team"`
-	IsOpenTeam     bool          `codec:"isOpenTeam" json:"is_open_team"`
-	Role           TeamRole      `codec:"role" json:"role"`
-	Implicit       *ImplicitRole `codec:"implicit,omitempty" json:"implicit,omitempty"`
-	MemberCount    int           `codec:"memberCount" json:"member_count"`
+	UserID              UID           `codec:"userID" json:"uid"`
+	TeamID              TeamID        `codec:"teamID" json:"team_id"`
+	FqName              string        `codec:"fqName" json:"fq_name"`
+	IsImplicitTeam      bool          `codec:"isImplicitTeam" json:"is_implicit_team"`
+	IsOpenTeam          bool          `codec:"isOpenTeam" json:"is_open_team"`
+	Role                TeamRole      `codec:"role" json:"role"`
+	Implicit            *ImplicitRole `codec:"implicit,omitempty" json:"implicit,omitempty"`
+	MemberCount         int           `codec:"memberCount" json:"member_count"`
+	AllowProfilePromote bool          `codec:"allowProfilePromote" json:"allow_profile_promote"`
+	IsMemberShowcased   bool          `codec:"isMemberShowcased" json:"is_member_showcased"`
 }
 
 func (o MemberInfo) DeepCopy() MemberInfo {
@@ -1583,7 +1601,9 @@ func (o MemberInfo) DeepCopy() MemberInfo {
 			tmp := (*x).DeepCopy()
 			return &tmp
 		})(o.Implicit),
-		MemberCount: o.MemberCount,
+		MemberCount:         o.MemberCount,
+		AllowProfilePromote: o.AllowProfilePromote,
+		IsMemberShowcased:   o.IsMemberShowcased,
 	}
 }
 
@@ -1608,19 +1628,21 @@ func (o TeamList) DeepCopy() TeamList {
 }
 
 type AnnotatedMemberInfo struct {
-	UserID         UID           `codec:"userID" json:"uid"`
-	TeamID         TeamID        `codec:"teamID" json:"team_id"`
-	Username       string        `codec:"username" json:"username"`
-	FullName       string        `codec:"fullName" json:"full_name"`
-	FqName         string        `codec:"fqName" json:"fq_name"`
-	IsImplicitTeam bool          `codec:"isImplicitTeam" json:"is_implicit_team"`
-	IsOpenTeam     bool          `codec:"isOpenTeam" json:"is_open_team"`
-	Role           TeamRole      `codec:"role" json:"role"`
-	Implicit       *ImplicitRole `codec:"implicit,omitempty" json:"implicit,omitempty"`
-	NeedsPUK       bool          `codec:"needsPUK" json:"needsPUK"`
-	MemberCount    int           `codec:"memberCount" json:"member_count"`
-	EldestSeqno    Seqno         `codec:"eldestSeqno" json:"member_eldest_seqno"`
-	Active         bool          `codec:"active" json:"active"`
+	UserID              UID           `codec:"userID" json:"uid"`
+	TeamID              TeamID        `codec:"teamID" json:"team_id"`
+	Username            string        `codec:"username" json:"username"`
+	FullName            string        `codec:"fullName" json:"full_name"`
+	FqName              string        `codec:"fqName" json:"fq_name"`
+	IsImplicitTeam      bool          `codec:"isImplicitTeam" json:"is_implicit_team"`
+	IsOpenTeam          bool          `codec:"isOpenTeam" json:"is_open_team"`
+	Role                TeamRole      `codec:"role" json:"role"`
+	Implicit            *ImplicitRole `codec:"implicit,omitempty" json:"implicit,omitempty"`
+	NeedsPUK            bool          `codec:"needsPUK" json:"needsPUK"`
+	MemberCount         int           `codec:"memberCount" json:"member_count"`
+	EldestSeqno         Seqno         `codec:"eldestSeqno" json:"member_eldest_seqno"`
+	Active              bool          `codec:"active" json:"active"`
+	AllowProfilePromote bool          `codec:"allowProfilePromote" json:"allow_profile_promote"`
+	IsMemberShowcased   bool          `codec:"isMemberShowcased" json:"is_member_showcased"`
 }
 
 func (o AnnotatedMemberInfo) DeepCopy() AnnotatedMemberInfo {
@@ -1640,10 +1662,12 @@ func (o AnnotatedMemberInfo) DeepCopy() AnnotatedMemberInfo {
 			tmp := (*x).DeepCopy()
 			return &tmp
 		})(o.Implicit),
-		NeedsPUK:    o.NeedsPUK,
-		MemberCount: o.MemberCount,
-		EldestSeqno: o.EldestSeqno.DeepCopy(),
-		Active:      o.Active,
+		NeedsPUK:            o.NeedsPUK,
+		MemberCount:         o.MemberCount,
+		EldestSeqno:         o.EldestSeqno.DeepCopy(),
+		Active:              o.Active,
+		AllowProfilePromote: o.AllowProfilePromote,
+		IsMemberShowcased:   o.IsMemberShowcased,
 	}
 }
 
@@ -1975,11 +1999,13 @@ type TeamOperation struct {
 	ManageMembers          bool `codec:"manageMembers" json:"manageMembers"`
 	ManageSubteams         bool `codec:"manageSubteams" json:"manageSubteams"`
 	CreateChannel          bool `codec:"createChannel" json:"createChannel"`
+	Chat                   bool `codec:"chat" json:"chat"`
 	DeleteChannel          bool `codec:"deleteChannel" json:"deleteChannel"`
 	RenameChannel          bool `codec:"renameChannel" json:"renameChannel"`
 	EditChannelDescription bool `codec:"editChannelDescription" json:"editChannelDescription"`
 	SetTeamShowcase        bool `codec:"setTeamShowcase" json:"setTeamShowcase"`
 	SetMemberShowcase      bool `codec:"setMemberShowcase" json:"setMemberShowcase"`
+	SetRetentionPolicy     bool `codec:"setRetentionPolicy" json:"setRetentionPolicy"`
 	ChangeOpenTeam         bool `codec:"changeOpenTeam" json:"changeOpenTeam"`
 	LeaveTeam              bool `codec:"leaveTeam" json:"leaveTeam"`
 	JoinTeam               bool `codec:"joinTeam" json:"joinTeam"`
@@ -1994,11 +2020,13 @@ func (o TeamOperation) DeepCopy() TeamOperation {
 		ManageMembers:          o.ManageMembers,
 		ManageSubteams:         o.ManageSubteams,
 		CreateChannel:          o.CreateChannel,
+		Chat:                   o.Chat,
 		DeleteChannel:          o.DeleteChannel,
 		RenameChannel:          o.RenameChannel,
 		EditChannelDescription: o.EditChannelDescription,
 		SetTeamShowcase:        o.SetTeamShowcase,
 		SetMemberShowcase:      o.SetMemberShowcase,
+		SetRetentionPolicy:     o.SetRetentionPolicy,
 		ChangeOpenTeam:         o.ChangeOpenTeam,
 		LeaveTeam:              o.LeaveTeam,
 		JoinTeam:               o.JoinTeam,
@@ -2124,7 +2152,8 @@ type TeamAcceptInviteOrRequestAccessArg struct {
 }
 
 type TeamListRequestsArg struct {
-	SessionID int `codec:"sessionID" json:"sessionID"`
+	SessionID int     `codec:"sessionID" json:"sessionID"`
+	TeamName  *string `codec:"teamName,omitempty" json:"teamName,omitempty"`
 }
 
 type TeamListMyAccessRequestsArg struct {
@@ -2261,7 +2290,7 @@ type TeamsInterface interface {
 	TeamAcceptInvite(context.Context, TeamAcceptInviteArg) error
 	TeamRequestAccess(context.Context, TeamRequestAccessArg) (TeamRequestAccessResult, error)
 	TeamAcceptInviteOrRequestAccess(context.Context, TeamAcceptInviteOrRequestAccessArg) (TeamAcceptOrRequestResult, error)
-	TeamListRequests(context.Context, int) ([]TeamJoinRequest, error)
+	TeamListRequests(context.Context, TeamListRequestsArg) ([]TeamJoinRequest, error)
 	TeamListMyAccessRequests(context.Context, TeamListMyAccessRequestsArg) ([]TeamName, error)
 	TeamIgnoreRequest(context.Context, TeamIgnoreRequestArg) error
 	TeamTree(context.Context, TeamTreeArg) (TeamTreeResult, error)
@@ -2576,7 +2605,7 @@ func TeamsProtocol(i TeamsInterface) rpc.Protocol {
 						err = rpc.NewTypeError((*[]TeamListRequestsArg)(nil), args)
 						return
 					}
-					ret, err = i.TeamListRequests(ctx, (*typedArgs)[0].SessionID)
+					ret, err = i.TeamListRequests(ctx, (*typedArgs)[0])
 					return
 				},
 				MethodType: rpc.MethodCall,
@@ -3026,8 +3055,7 @@ func (c TeamsClient) TeamAcceptInviteOrRequestAccess(ctx context.Context, __arg 
 	return
 }
 
-func (c TeamsClient) TeamListRequests(ctx context.Context, sessionID int) (res []TeamJoinRequest, err error) {
-	__arg := TeamListRequestsArg{SessionID: sessionID}
+func (c TeamsClient) TeamListRequests(ctx context.Context, __arg TeamListRequestsArg) (res []TeamJoinRequest, err error) {
 	err = c.Cli.Call(ctx, "keybase.1.teams.teamListRequests", []interface{}{__arg}, &res)
 	return
 }

@@ -342,7 +342,7 @@ func NewRemoteInboxSource(g *globals.Context, ri func() chat1.RemoteInterface) *
 	s := &RemoteInboxSource{
 		Contextified:     globals.NewContextified(g),
 		DebugLabeler:     labeler,
-		sourceOfflinable: newSourceOfflinable(labeler),
+		sourceOfflinable: newSourceOfflinable(g, labeler),
 	}
 	s.baseInboxSource = newBaseInboxSource(g, s, ri)
 	return s
@@ -487,13 +487,13 @@ func NewHybridInboxSource(g *globals.Context,
 	s := &HybridInboxSource{
 		Contextified:     globals.NewContextified(g),
 		DebugLabeler:     labeler,
-		sourceOfflinable: newSourceOfflinable(labeler),
+		sourceOfflinable: newSourceOfflinable(g, labeler),
 	}
 	s.baseInboxSource = newBaseInboxSource(g, s, getChatInterface)
 	return s
 }
 
-func (s *HybridInboxSource) fetchRemoteInbox(ctx context.Context, query *chat1.GetInboxQuery,
+func (s *HybridInboxSource) fetchRemoteInbox(ctx context.Context, uid gregor1.UID, query *chat1.GetInboxQuery,
 	p *chat1.Pagination) (types.Inbox, *chat1.RateLimit, error) {
 
 	// Insta fail if we are offline
@@ -523,6 +523,28 @@ func (s *HybridInboxSource) fetchRemoteInbox(ctx context.Context, query *chat1.G
 	})
 	if err != nil {
 		return types.Inbox{}, ib.RateLimit, err
+	}
+
+	for index, conv := range ib.Inbox.Full().Conversations {
+		// Retention policy expunge
+		expunge := conv.GetExpunge()
+		if expunge != nil {
+			s.G().ConvSource.Expunge(ctx, conv.GetConvID(), uid, *expunge)
+		}
+		// Delete message expunge
+		if delMsg, err := conv.GetMaxMessage(chat1.MessageType_DELETE); err == nil {
+			s.G().ConvSource.ExpungeFromDelete(ctx, uid, conv.GetConvID(), delMsg.GetMessageID())
+		}
+
+		// Queue all these convs up to be loaded by the background loader
+		// Only load first 100 so we don't get the conv loader too backed up
+		if index < 100 {
+			job := types.NewConvLoaderJob(conv.GetConvID(), &chat1.Pagination{Num: 50},
+				types.ConvLoaderPriorityMedium, newConvLoaderPagebackHook(s.G(), 0, 5))
+			if err := s.G().ConvLoader.Queue(ctx, job); err != nil {
+				s.Debug(ctx, "fetchRemoteInbox: failed to queue conversation load: %s", err)
+			}
+		}
 	}
 
 	return types.Inbox{
@@ -569,7 +591,7 @@ func (s *HybridInboxSource) Read(ctx context.Context, uid gregor1.UID,
 
 	// Write metadata to the inbox cache
 	if err = storage.NewInbox(s.G(), uid).MergeLocalMetadata(ctx, inbox.Convs); err != nil {
-		// Don't abort the operaton on this kind of error
+		// Don't abort the operation on this kind of error
 		s.Debug(ctx, "Read: unable to write inbox local metadata: %s", err)
 	}
 
@@ -610,12 +632,12 @@ func (s *HybridInboxSource) ReadUnverified(ctx context.Context, uid gregor1.UID,
 		}
 
 		// Go to the remote on miss
-		res, rl, err = s.fetchRemoteInbox(ctx, query, p)
+		res, rl, err = s.fetchRemoteInbox(ctx, uid, query, p)
 		if err != nil {
 			return res, rl, err
 		}
 
-		// Write out to local storage only if we are using local daata
+		// Write out to local storage only if we are using local data
 		if useLocalData {
 			if cerr = inboxStore.Merge(ctx, res.Version, utils.PluckConvs(res.ConvsUnverified), query, p); cerr != nil {
 				s.Debug(ctx, "ReadUnverified: failed to write inbox to local storage: %s", cerr.Error())
@@ -1263,48 +1285,11 @@ func (s *localizerPipeline) localizeConversation(ctx context.Context, uid gregor
 	// Form the writers name list, either from the active list + TLF name, or from the
 	// channel information for a team chat
 	switch conversationRemote.GetMembersType() {
-	case chat1.ConversationMembersType_IMPTEAMNATIVE, chat1.ConversationMembersType_IMPTEAMUPGRADE:
-		ok := true
-		var errMsg string
-		s.Debug(ctx, "localizeConversation: trying to load team for %v chat", conversationLocal.Info.Visibility)
-		iteam, err := LoadTeam(ctx, s.G().ExternalG(), conversationLocal.Info.Triple.Tlfid,
-			conversationLocal.Info.TlfName,
-			conversationRemote.GetMembersType(),
-			conversationLocal.Info.Visibility == keybase1.TLFVisibility_PUBLIC, nil)
-		if err != nil {
-			ok = false
-			errMsg = fmt.Sprintf("unable to load iteam: %v", err.Error())
-		}
-		var iteamName string
-		if ok {
-			iteamName, err = iteam.ImplicitTeamDisplayNameString(ctx)
-			if err != nil {
-				ok = false
-				errMsg = fmt.Sprintf("failed to read : %v", err.Error())
-			}
-		}
-		if ok {
-			conversationLocal.Info.ResetNames = s.getResetUserNames(ctx, umapper, conversationRemote)
-			conversationLocal.Info.Participants, err = utils.ReorderParticipants(
-				ctx,
-				s.G(),
-				umapper,
-				iteamName,
-				conversationRemote.Metadata.ActiveList)
-			if err != nil {
-				ok = false
-				errMsg = fmt.Sprintf("error reordering participants: %v", err.Error())
-			}
-		}
-		if !ok {
-			s.Debug(ctx, "localizeConversation: failed to get implicit team members: %s", errMsg)
-		}
 	case chat1.ConversationMembersType_TEAM:
 		var kuids []keybase1.UID
 		for _, uid := range conversationRemote.Metadata.AllList {
 			kuids = append(kuids, keybase1.UID(uid.String()))
 		}
-
 		conversationLocal.Info.ResetNames = s.getResetUserNames(ctx, umapper, conversationRemote)
 		rows, err := umapper.MapUIDsToUsernamePackages(ctx, s.G(), kuids, time.Hour*24,
 			10*time.Second, true)
@@ -1320,7 +1305,9 @@ func (s *localizerPipeline) localizeConversation(ctx context.Context, uid gregor
 			return conversationLocal.Info.Participants[i].Username <
 				conversationLocal.Info.Participants[j].Username
 		})
-
+	case chat1.ConversationMembersType_IMPTEAMNATIVE, chat1.ConversationMembersType_IMPTEAMUPGRADE:
+		conversationLocal.Info.ResetNames = s.getResetUserNames(ctx, umapper, conversationRemote)
+		fallthrough
 	case chat1.ConversationMembersType_KBFS:
 		var err error
 		conversationLocal.Info.Participants, err = utils.ReorderParticipants(

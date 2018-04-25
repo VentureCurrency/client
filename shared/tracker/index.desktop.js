@@ -1,14 +1,14 @@
 // @flow
 import React, {PureComponent} from 'react'
-import Header from './header.render.desktop'
-import Action, {calcFooterHeight} from './action.render.desktop'
+import Header from './header.desktop'
+import Action, {calcFooterHeight} from './action.desktop'
 import {Avatar, Box, Meta, Text, UserBio, UserProofs} from '../common-adapters'
 import {globalColors, globalMargins, globalStyles} from '../styles'
 import {ModalPositionRelative} from '../common-adapters/relative-popup-hoc.desktop'
 import TeamInfo from '../profile/showcased-team-info'
 import NonUser from './non-user'
 import {autoResize} from '../desktop/remote/util'
-import TrackerError from './error'
+import TrackerError from './error.desktop'
 
 import type {RenderProps} from '.'
 
@@ -116,6 +116,7 @@ export default class TrackerRender extends PureComponent<RenderProps> {
                       this.props.showTeam.fqName === team.fqName &&
                       this.props.selectedTeamRect && (
                         <Box key={team.fqName + 'popup'} style={{zIndex: 50}}>
+                          {/* $FlowIssue style will always be overridden */}
                           <ModalPopupComponent
                             {...this.props}
                             targetRect={this.props.selectedTeamRect}
@@ -152,7 +153,9 @@ export default class TrackerRender extends PureComponent<RenderProps> {
                       }}
                     >
                       <Text type="BodySemibold">{team.fqName}</Text>
-                      {team.open && <Meta title="OPEN" style={styleMeta} />}
+                      {team.open && (
+                        <Meta title="open" style={styleMeta} backgroundColor={globalColors.green} />
+                      )}
                     </Box>
                   </Box>
                 ))}
@@ -227,8 +230,6 @@ const styleFooter = {
 
 const styleMeta = {
   alignSelf: 'center',
-  backgroundColor: globalColors.green,
-  borderRadius: 1,
   marginLeft: globalMargins.xtiny,
   marginTop: 2,
 }

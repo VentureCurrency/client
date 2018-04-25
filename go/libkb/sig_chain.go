@@ -573,6 +573,7 @@ func (sc *SigChain) verifySubchain(ctx context.Context, kf KeyFamily, links Chai
 	ckf := ComputedKeyFamily{kf: &kf, cki: cki, Contextified: sc.Contextified}
 
 	first := true
+	seenInflatedWalletStellarLink := false
 
 	for linkIndex, link := range links {
 		if isBad, reason := link.IsBad(); isBad {
@@ -586,6 +587,15 @@ func (sc *SigChain) verifySubchain(ctx context.Context, kf KeyFamily, links Chai
 			}
 			if link.NeedsSignature() {
 				return cached, cki, SigchainV2StubbedSignatureNeededError{}
+			}
+			linkTypeV2, err := link.GetSigchainV2TypeFromV2Shell()
+			if err != nil {
+				return cached, cki, err
+			}
+			if linkTypeV2 == SigchainV2TypeWalletStellar && seenInflatedWalletStellarLink {
+				// There may not be stubbed wallet links following an unstubbed wallet links (for a given network).
+				// So that the server can't roll back someone's active wallet address.
+				return cached, cki, SigchainV2StubbedDisallowed{}
 			}
 			sc.G().VDL.Log(VLog1, "| Skipping over stubbed-out link: %s", link.id)
 			continue
@@ -645,6 +655,15 @@ func (sc *SigChain) verifySubchain(ctx context.Context, kf KeyFamily, links Chai
 			if err != nil {
 				return cached, cki, err
 			}
+		}
+
+		if _, ok := tcl.(*WalletStellarChainLink); ok {
+			// Assert that wallet chain links are be >= v2.
+			// They must be v2 in order to be stubbable later for privacy.
+			if link.unpacked.sigVersion < 2 {
+				return cached, cki, SigchainV2Required{}
+			}
+			seenInflatedWalletStellarLink = true
 		}
 
 		if err = tcl.VerifyReverseSig(ckf); err != nil {
@@ -752,7 +771,7 @@ func (c ChainLinks) omittingNRightmostLinks(n int) ChainLinks {
 }
 
 // VerifySigsAndComputeKeys iterates over all potentially all incarnations of the user, trying to compute
-// multiple subchains. It returns (bool, error), where bool is true if the load hit the cache, and false othewise.
+// multiple subchains. It returns (bool, error), where bool is true if the load hit the cache, and false otherwise.
 func (sc *SigChain) VerifySigsAndComputeKeys(ctx context.Context, eldest keybase1.KID, ckf *ComputedKeyFamily) (bool, error) {
 	// First consume the currently active sigchain.
 	cached, numLinksConsumed, err := sc.verifySigsAndComputeKeysCurrent(ctx, eldest, ckf)
@@ -788,7 +807,7 @@ func (sc *SigChain) verifySigsAndComputeKeysHistorical(ctx context.Context, allL
 
 	for {
 		if len(allLinks) == 0 {
-			sc.G().Log.CDebugf(ctx, "Ending iteration through previous subchains; no futher links")
+			sc.G().Log.CDebugf(ctx, "Ending iteration through previous subchains; no further links")
 			break
 		}
 

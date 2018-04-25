@@ -5,82 +5,44 @@
       "path": "github.com/keybase/client/go/protocol/keybase1",
       "type": "idl",
       "import_as": "keybase1"
+    },
+    {
+      "path": "common.avdl",
+      "type": "idl"
     }
   ],
   "types": [
     {
       "type": "record",
-      "name": "AccountID",
-      "fields": [],
-      "typedef": "string"
-    },
-    {
-      "type": "record",
-      "name": "TransactionID",
-      "fields": [],
-      "typedef": "string"
-    },
-    {
-      "type": "record",
-      "name": "KeybaseTransactionID",
-      "fields": [],
-      "typedef": "bytes"
-    },
-    {
-      "type": "record",
-      "name": "Asset",
+      "name": "Members",
       "fields": [
         {
-          "type": "string",
-          "name": "type"
+          "type": "AccountID",
+          "name": "fromStellar"
         },
         {
           "type": "string",
-          "name": "code"
+          "name": "fromKeybase"
+        },
+        {
+          "type": "keybase1.UserVersion",
+          "name": "from"
+        },
+        {
+          "type": "keybase1.DeviceID",
+          "name": "fromDeviceID"
+        },
+        {
+          "type": "AccountID",
+          "name": "toStellar"
         },
         {
           "type": "string",
-          "name": "issuer"
-        }
-      ]
-    },
-    {
-      "type": "record",
-      "name": "Balance",
-      "fields": [
-        {
-          "type": "Asset",
-          "name": "asset"
+          "name": "toKeybase"
         },
         {
-          "type": "string",
-          "name": "amount"
-        },
-        {
-          "type": "string",
-          "name": "limit"
-        }
-      ]
-    },
-    {
-      "type": "record",
-      "name": "EncryptedNote",
-      "fields": [
-        {
-          "type": "int",
-          "name": "v"
-        },
-        {
-          "type": "bytes",
-          "name": "e"
-        },
-        {
-          "type": "bytes",
-          "name": "n"
-        },
-        {
-          "type": "keybase1.KID",
-          "name": "KID"
+          "type": "keybase1.UserVersion",
+          "name": "to"
         }
       ]
     },
@@ -97,8 +59,16 @@
           "name": "keybaseID"
         },
         {
-          "type": "EncryptedNote",
-          "name": "note"
+          "type": "TransactionStatus",
+          "name": "status"
+        },
+        {
+          "type": "string",
+          "name": "errMsg"
+        },
+        {
+          "type": "string",
+          "name": "noteB64"
         },
         {
           "type": "Asset",
@@ -109,20 +79,24 @@
           "name": "amount"
         },
         {
-          "type": "AccountID",
-          "name": "stellarFrom"
+          "type": "string",
+          "name": "displayAmount"
         },
         {
-          "type": "AccountID",
-          "name": "stellarTo"
+          "type": "string",
+          "name": "displayCurrency"
         },
         {
-          "type": "keybase1.UID",
-          "name": "keybaseFrom"
+          "type": "Members",
+          "name": "members"
         },
         {
-          "type": "keybase1.UID",
-          "name": "keybaseTo"
+          "type": "TimeMs",
+          "name": "ctime"
+        },
+        {
+          "type": "TimeMs",
+          "name": "rtime"
         }
       ]
     },
@@ -153,78 +127,6 @@
         {
           "type": "string",
           "name": "amount"
-        },
-        {
-          "type": "AccountID",
-          "name": "stellarFrom"
-        },
-        {
-          "type": "AccountID",
-          "name": "stellarTo"
-        },
-        {
-          "type": "keybase1.UID",
-          "name": "keybaseFrom"
-        },
-        {
-          "type": "keybase1.UID",
-          "name": "keybaseTo"
-        }
-      ]
-    },
-    {
-      "type": "record",
-      "name": "TransactionDetails",
-      "fields": [
-        {
-          "type": "TransactionID",
-          "name": "stellarID"
-        },
-        {
-          "type": "KeybaseTransactionID",
-          "name": "keybaseID"
-        },
-        {
-          "type": "string",
-          "name": "Hash"
-        },
-        {
-          "type": "int",
-          "name": "ledger"
-        },
-        {
-          "type": "int",
-          "name": "ledgerCloseTime"
-        },
-        {
-          "type": "AccountID",
-          "name": "sourceAccount"
-        },
-        {
-          "type": "string",
-          "name": "sourceAccountSequence"
-        },
-        {
-          "type": "int",
-          "name": "feePaid"
-        },
-        {
-          "type": "EncryptedNote",
-          "name": "note"
-        },
-        {
-          "type": {
-            "type": "array",
-            "items": "string"
-          },
-          "name": "signatures"
-        },
-        {
-          "type": {
-            "type": "array",
-            "items": "Operation"
-          },
-          "name": "operations"
         }
       ]
     },
@@ -233,32 +135,12 @@
       "name": "PaymentPost",
       "fields": [
         {
-          "type": "AccountID",
-          "name": "from"
-        },
-        {
-          "type": "AccountID",
-          "name": "to"
-        },
-        {
           "type": "uint64",
-          "name": "sequenceNumber"
+          "name": "stellarAccountSeqno"
         },
         {
-          "type": "string",
-          "name": "keybaseFrom"
-        },
-        {
-          "type": "string",
-          "name": "keybaseTo"
-        },
-        {
-          "type": "string",
-          "name": "transactionType"
-        },
-        {
-          "type": "string",
-          "name": "xlmAmount"
+          "type": "Members",
+          "name": "members"
         },
         {
           "type": "string",
@@ -269,8 +151,8 @@
           "name": "displayCurrency"
         },
         {
-          "type": "EncryptedNote",
-          "name": "note"
+          "type": "string",
+          "name": "noteB64"
         },
         {
           "type": "string",
@@ -280,19 +162,114 @@
     },
     {
       "type": "record",
-      "name": "PaymentResult",
+      "name": "PaymentSummary",
       "fields": [
         {
-          "type": "TransactionID",
-          "name": "stellarID"
+          "type": [
+            null,
+            "PaymentSummaryStellar"
+          ],
+          "name": "stellar"
         },
+        {
+          "type": [
+            null,
+            "PaymentSummaryKeybase"
+          ],
+          "name": "keybase"
+        },
+        {
+          "type": "TransactionID",
+          "name": "stellarTxID"
+        },
+        {
+          "type": "AccountID",
+          "name": "from"
+        },
+        {
+          "type": "AccountID",
+          "name": "to"
+        },
+        {
+          "type": "string",
+          "name": "amount"
+        },
+        {
+          "type": "Asset",
+          "name": "asset"
+        }
+      ]
+    },
+    {
+      "type": "record",
+      "name": "PaymentSummaryKeybase",
+      "fields": [
         {
           "type": "KeybaseTransactionID",
-          "name": "keybaseID"
+          "name": "kbTxID"
         },
         {
-          "type": "int",
-          "name": "Ledger"
+          "type": "TransactionStatus",
+          "name": "status"
+        },
+        {
+          "type": "string",
+          "name": "submitErrMsg"
+        },
+        {
+          "type": "TimeMs",
+          "name": "ctime"
+        },
+        {
+          "type": "TimeMs",
+          "name": "rtime"
+        },
+        {
+          "type": "keybase1.UserVersion",
+          "name": "from"
+        },
+        {
+          "type": "keybase1.DeviceID",
+          "name": "fromDeviceID"
+        },
+        {
+          "type": [
+            null,
+            "keybase1.UserVersion"
+          ],
+          "name": "to"
+        },
+        {
+          "type": [
+            null,
+            "string"
+          ],
+          "name": "displayAmount"
+        },
+        {
+          "type": [
+            null,
+            "string"
+          ],
+          "name": "displayCurrency"
+        },
+        {
+          "type": "string",
+          "name": "noteB64"
+        }
+      ]
+    },
+    {
+      "type": "record",
+      "name": "PaymentSummaryStellar",
+      "fields": [
+        {
+          "type": "uint64",
+          "name": "operationID"
+        },
+        {
+          "type": "TimeMs",
+          "name": "ctime"
         }
       ]
     }
@@ -301,8 +278,8 @@
     "balances": {
       "request": [
         {
-          "name": "uid",
-          "type": "keybase1.UID"
+          "name": "caller",
+          "type": "keybase1.UserVersion"
         },
         {
           "name": "accountID",
@@ -314,44 +291,57 @@
         "items": "Balance"
       }
     },
-    "recentTransactions": {
+    "recentPayments": {
       "request": [
         {
-          "name": "uid",
-          "type": "keybase1.UID"
+          "name": "caller",
+          "type": "keybase1.UserVersion"
         },
         {
           "name": "accountID",
           "type": "AccountID"
         },
         {
-          "name": "count",
+          "name": "limit",
           "type": "int"
         }
       ],
       "response": {
         "type": "array",
-        "items": "TransactionSummary"
+        "items": "PaymentSummary"
       }
     },
-    "transaction": {
+    "paymentDetail": {
       "request": [
         {
-          "name": "uid",
-          "type": "keybase1.UID"
+          "name": "caller",
+          "type": "keybase1.UserVersion"
         },
         {
-          "name": "id",
-          "type": "TransactionID"
+          "name": "txID",
+          "type": "string"
         }
       ],
-      "response": "TransactionDetails"
+      "response": "PaymentSummary"
+    },
+    "accountSeqno": {
+      "request": [
+        {
+          "name": "caller",
+          "type": "keybase1.UserVersion"
+        },
+        {
+          "name": "accountID",
+          "type": "AccountID"
+        }
+      ],
+      "response": "string"
     },
     "submitPayment": {
       "request": [
         {
-          "name": "uid",
-          "type": "keybase1.UID"
+          "name": "caller",
+          "type": "keybase1.UserVersion"
         },
         {
           "name": "payment",
@@ -359,6 +349,19 @@
         }
       ],
       "response": "PaymentResult"
+    },
+    "isMasterKeyActive": {
+      "request": [
+        {
+          "name": "caller",
+          "type": "keybase1.UserVersion"
+        },
+        {
+          "name": "accountID",
+          "type": "AccountID"
+        }
+      ],
+      "response": "boolean"
     }
   },
   "namespace": "stellar.1"

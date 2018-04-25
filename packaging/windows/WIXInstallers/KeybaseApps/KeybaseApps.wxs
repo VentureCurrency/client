@@ -26,6 +26,7 @@
 
     <InstallExecuteSequence>
       <InstallValidate Suppress="yes">FAKE_PROPERTY</InstallValidate>
+      <Custom Action="LogoutUser" Before="StopMainApp"><![CDATA[REMOVE ~= "ALL" AND NOT (UPGRADINGPRODUCTCODE OR WIX_UPGRADE_DETECTED)]]></Custom>
       <Custom Action="StopMainApp" Before="StopUpdater"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR WIX_UPGRADE_DETECTED]]></Custom>
       <Custom Action="StopUpdater" Before="StopGUI"><![CDATA[Installed OR UPGRADINGPRODUCTCODE OR WIX_UPGRADE_DETECTED]]></Custom>
       <Custom Action="RemoveBrowserExtension" Before="InstallValidate"><![CDATA[Installed]]></Custom>
@@ -182,7 +183,12 @@
                 Name="Keybase"
                 Description="Start GUI"
                 Target="[GuiDir]Keybase.exe"
-                WorkingDirectory="GuiDir"/>
+                WorkingDirectory="GuiDir">
+        <!-- Windows needs this for notifications to show on certain versions
+           https://msdn.microsoft.com/en-us/library/windows/desktop/dd378459(v=vs.85).aspx
+           https://support.microsoft.com/en-us/help/2745126/warning-1946-message-when-you-install-a-windows-installer-package-in-w -->
+        <ShortcutProperty Key="{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5" Value="Keybase.Keybase.GUI" />
+      </Shortcut>
       <RegistryValue Root="HKCU" Key="Software\Keybase\Keybase" Name="ShortCutGUI" Type="integer" Value="1" KeyPath="yes"/>
     </Component>
   </Fragment>
@@ -260,4 +266,12 @@
               Execute="immediate"
               Return="ignore"/>
   </Fragment>
+  <Fragment>
+    <CustomAction Id="LogoutUser"
+              Directory="INSTALLFOLDER"
+              ExeCommand="[INSTALLFOLDER]keybaserq.exe -wait &quot;[INSTALLFOLDER]keybase.exe&quot; logout"
+              Execute="immediate"
+              Return="ignore"/>
+  </Fragment>
+
 </Wix>

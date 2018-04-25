@@ -2,7 +2,7 @@
 import * as React from 'react'
 import * as I from 'immutable'
 
-// I put a lot of FlowIssues here so i could get this checked in. The typing of this isn't perfect, but its getting closer
+// I put a lot of FlowIssues here so I could get this checked in. The typing of this isn't perfect, but it's getting closer
 
 type _LeafTags = {
   persistChildren: boolean, // Whether to persist children state when navigating to this route.
@@ -63,6 +63,7 @@ const _makeRouteDefNode: I.RecordFactory<_RouteDefNode> = I.Record({
 })
 
 class MakeRouteDefNodeClass extends _makeRouteDefNode {
+  children: any
   constructor({defaultSelected, component, containerComponent, tags, initialState, children}) {
     // $FlowIssue
     super({
@@ -92,7 +93,6 @@ class MakeRouteDefNodeClass extends _makeRouteDefNode {
       return this.children(name)
     }
 
-    // $FlowIssue
     const childDef = this.children.get(name)
     if (childDef && typeof childDef === 'function') {
       return childDef(name)
@@ -166,8 +166,6 @@ export function dataToRouteState(data: Object): RouteStateNode {
   )
 }
 
-export class InvalidRouteError extends Error {}
-
 // Explicit list of iterable types to accept. We don't want to allow strings
 // since navigateTo('foo') instead of navigateTo(['foo']) is an easy mistake to
 // make.
@@ -208,7 +206,7 @@ function _routeSet(
     // $FlowIssue
     const childDef = routeDef.getChild(childName)
     if (!childDef) {
-      throw new InvalidRouteError(`Invalid route child: ${childName}`)
+      throw new Error(`Invalid route child: ${childName}`)
     }
 
     newRouteState = newRouteState.updateChild(childName, childState => {
@@ -269,7 +267,7 @@ export function routeSetState(
   // $FlowIssue
   return routeState.updateChild(name, childState => {
     if (!childState) {
-      throw new InvalidRouteError(`Missing state child: ${name || 'undefined'}`)
+      throw new Error(`Missing state child: ${name || 'undefined'}`)
     }
     return routeSetState(routeDef, childState, pathSeq.skip(1), partialState)
   })

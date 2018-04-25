@@ -10,6 +10,7 @@ import (
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
 	"github.com/keybase/client/go/protocol/keybase1"
+	"github.com/keybase/clockwork"
 	"github.com/keybase/go-codec/codec"
 	"golang.org/x/net/context"
 )
@@ -31,10 +32,12 @@ type Storage struct {
 	globals.Contextified
 	utils.DebugLabeler
 
-	engine       storageEngine
-	idtracker    *msgIDTracker
-	breakTracker *breakTracker
-	delhTracker  *delhTracker
+	engine           storageEngine
+	idtracker        *msgIDTracker
+	breakTracker     *breakTracker
+	delhTracker      *delhTracker
+	ephemeralTracker *ephemeralTracker
+	clock            clockwork.Clock
 }
 
 type storageEngine interface {
@@ -48,17 +51,23 @@ type storageEngine interface {
 
 func New(g *globals.Context) *Storage {
 	return &Storage{
-		Contextified: globals.NewContextified(g),
-		engine:       newBlockEngine(g),
-		idtracker:    newMsgIDTracker(g),
-		breakTracker: newBreakTracker(g),
-		delhTracker:  newDelhTracker(g),
-		DebugLabeler: utils.NewDebugLabeler(g.GetLog(), "Storage", false),
+		Contextified:     globals.NewContextified(g),
+		engine:           newBlockEngine(g),
+		idtracker:        newMsgIDTracker(g),
+		breakTracker:     newBreakTracker(g),
+		delhTracker:      newDelhTracker(g),
+		ephemeralTracker: newEphemeralTracker(g),
+		clock:            clockwork.NewRealClock(),
+		DebugLabeler:     utils.NewDebugLabeler(g.GetLog(), "Storage", false),
 	}
 }
 
 func (s *Storage) setEngine(engine storageEngine) {
 	s.engine = engine
+}
+
+func (s *Storage) SetClock(clock clockwork.Clock) {
+	s.clock = clock
 }
 
 func makeBlockIndexKey(convID chat1.ConversationID, uid gregor1.UID) libkb.DbKey {
@@ -85,7 +94,7 @@ func decode(data []byte, res interface{}) error {
 	return err
 }
 
-// SimpleResultCollector aggregates all results in a the basic way. It is not thread safe.
+// SimpleResultCollector aggregates all results in a basic way. It is not thread safe.
 type SimpleResultCollector struct {
 	res    []chat1.MessageUnboxed
 	target int
@@ -177,7 +186,7 @@ func (s *InsatiableResultCollector) PushPlaceholder(chat1.MessageID) bool {
 	return true
 }
 
-// TypedResultCollector aggregates results with a type contraints. It is not thread safe.
+// TypedResultCollector aggregates results with a type constraints. It is not thread safe.
 type TypedResultCollector struct {
 	res         []chat1.MessageUnboxed
 	target, cur int
@@ -268,14 +277,16 @@ func (h *HoleyResultCollector) Holes() int {
 	return h.holes
 }
 
-func (s *Storage) MaybeNuke(force bool, err Error, convID chat1.ConversationID, uid gregor1.UID) Error {
+func (s *Storage) MaybeNuke(ctx context.Context, force bool, err Error, convID chat1.ConversationID,
+	uid gregor1.UID) Error {
 	// Clear index
 	if force || err.ShouldClear() {
-		s.G().Log.Warning("chat local storage corrupted: clearing")
+		s.Debug(ctx, "chat local storage corrupted: clearing")
 		if err := s.G().LocalChatDb.Delete(makeBlockIndexKey(convID, uid)); err != nil {
-			s.G().Log.Error("failed to delete chat index, clearing entire database (delete error: %s)", err)
+			s.Debug(ctx, "failed to delete chat index, clearing entire local storage (delete error: %s)",
+				err)
 			if _, err = s.G().LocalChatDb.Nuke(); err != nil {
-				panic("unable to clear local storage")
+				s.Debug(ctx, "failed to delete chat local storage: %s", err)
 			}
 		}
 	}
@@ -288,13 +299,13 @@ func (s *Storage) GetMaxMsgID(ctx context.Context, convID chat1.ConversationID, 
 
 	maxMsgID, err := s.idtracker.getMaxMessageID(ctx, convID, uid)
 	if err != nil {
-		return maxMsgID, s.MaybeNuke(false, err, convID, uid)
+		return maxMsgID, s.MaybeNuke(ctx, false, err, convID, uid)
 	}
 	return maxMsgID, nil
 }
 
 type MergeResult struct {
-	DeletedHistory bool
+	Expunged *chat1.Expunge
 }
 
 // Merge requires msgs to be sorted by descending message ID
@@ -314,17 +325,15 @@ func (s *Storage) Expunge(ctx context.Context,
 // MergeHelper requires msgs to be sorted by descending message ID
 // expunge is optional
 func (s *Storage) MergeHelper(ctx context.Context,
-	convID chat1.ConversationID, uid gregor1.UID, msgs []chat1.MessageUnboxed, expunge *chat1.Expunge) (MergeResult, Error) {
-
-	var res MergeResult
-	var err Error
+	convID chat1.ConversationID, uid gregor1.UID, msgs []chat1.MessageUnboxed, expunge *chat1.Expunge) (res MergeResult, err Error) {
+	defer s.Trace(ctx, func() error { return err }, "MergeHelper")()
 
 	// All public functions get locks to make access to the database single threaded.
-	// They should never be called from private functons.
+	// They should never be called from private functions.
 	locks.Storage.Lock()
 	defer locks.Storage.Unlock()
 
-	s.Debug(ctx, "Merge: convID: %s uid: %s num msgs: %d", convID, uid, len(msgs))
+	s.Debug(ctx, "MergeHelper: convID: %s uid: %s num msgs: %d", convID, uid, len(msgs))
 
 	// Fetch secret key
 	key, ierr := getSecretBoxKey(ctx, s.G().ExternalG(), DefaultSecretUI)
@@ -339,29 +348,33 @@ func (s *Storage) MergeHelper(ctx context.Context,
 
 	// Write out new data into blocks
 	if err = s.engine.WriteMessages(ctx, convID, uid, msgs); err != nil {
-		return res, s.MaybeNuke(false, err, convID, uid)
+		return res, s.MaybeNuke(ctx, false, err, convID, uid)
 	}
 
 	// Update supersededBy pointers
 	if err = s.updateAllSupersededBy(ctx, convID, uid, msgs); err != nil {
-		return res, s.MaybeNuke(false, err, convID, uid)
+		return res, s.MaybeNuke(ctx, false, err, convID, uid)
 	}
 
 	if err = s.updateMinDeletableMessage(ctx, convID, uid, msgs); err != nil {
-		return res, s.MaybeNuke(false, err, convID, uid)
+		return res, s.MaybeNuke(ctx, false, err, convID, uid)
 	}
 
 	// Process any DeleteHistory messages
-	deletedHistory, err := s.handleDeleteHistory(ctx, convID, uid, msgs, expunge)
+	expunged, err := s.handleDeleteHistory(ctx, convID, uid, msgs, expunge)
 	if err != nil {
-		return res, s.MaybeNuke(false, err, convID, uid)
+		return res, s.MaybeNuke(ctx, false, err, convID, uid)
 	}
-	res.DeletedHistory = deletedHistory
+	res.Expunged = expunged
+
+	if err = s.explodeExpiredMessages(ctx, convID, uid, msgs); err != nil {
+		return res, s.MaybeNuke(ctx, false, err, convID, uid)
+	}
 
 	// Update max msg ID if needed
 	if len(msgs) > 0 {
 		if err := s.idtracker.bumpMaxMessageID(ctx, convID, uid, msgs[0].GetMessageID()); err != nil {
-			return res, s.MaybeNuke(false, err, convID, uid)
+			return res, s.MaybeNuke(ctx, false, err, convID, uid)
 		}
 	}
 
@@ -483,12 +496,12 @@ func (s *Storage) updateMinDeletableMessage(ctx context.Context, convID chat1.Co
 }
 
 // Apply any new DeleteHistory from msgs.
-// Returns whether local deletes happened.
+// Returns a non-nil expunge if deletes happened.
 // Shortcircuits so it's ok to call a lot.
 // The actual effect will be to delete upto the max of `expungeExplicit` (which can be nil)
 //   and the DeleteHistory-type messages.
 func (s *Storage) handleDeleteHistory(ctx context.Context, convID chat1.ConversationID,
-	uid gregor1.UID, msgs []chat1.MessageUnboxed, expungeExplicit *chat1.Expunge) (bool, Error) {
+	uid gregor1.UID, msgs []chat1.MessageUnboxed, expungeExplicit *chat1.Expunge) (*chat1.Expunge, Error) {
 
 	de := func(format string, args ...interface{}) {
 		s.Debug(ctx, "handleDeleteHistory: "+fmt.Sprintf(format, args...))
@@ -532,10 +545,10 @@ func (s *Storage) handleDeleteHistory(ctx context.Context, convID chat1.Conversa
 
 	// Noop if there is no Expunge or DeleteHistory messages
 	if expungeActive == nil {
-		return false, nil
+		return nil, nil
 	}
 	if expungeActive.Upto == 0 {
-		return false, nil
+		return nil, nil
 	}
 
 	mem, err := s.delhTracker.getEntry(ctx, convID, uid)
@@ -544,7 +557,7 @@ func (s *Storage) handleDeleteHistory(ctx context.Context, convID chat1.Conversa
 		if mem.MaxDeleteHistoryUpto >= expungeActive.Upto {
 			// No-op if the effect has already been applied locally
 			de("skipping delh with no new effect: (upto local:%v >= msg:%v)", mem.MaxDeleteHistoryUpto, expungeActive.Upto)
-			return false, nil
+			return nil, nil
 		}
 		if expungeActive.Upto < mem.MinDeletableMessage {
 			// Record-only if it would delete messages earlier than the local min.
@@ -553,23 +566,23 @@ func (s *Storage) handleDeleteHistory(ctx context.Context, convID chat1.Conversa
 			if err != nil {
 				de("failed to store delh track: %v", err)
 			}
-			return false, nil
+			return nil, nil
 		}
 		// No shortcuts, fallthrough to apply.
 	case MissError:
 		// We have no memory, assume it needs to be applied
 	default:
-		return false, err
+		return nil, err
 	}
 
 	return s.applyExpunge(ctx, convID, uid, *expungeActive)
 }
 
 // Apply a delete history.
-// Returns whether local deletes happened.
+// Returns a non-nil expunge if deletes happened.
 // Always runs through local messages.
 func (s *Storage) applyExpunge(ctx context.Context, convID chat1.ConversationID,
-	uid gregor1.UID, expunge chat1.Expunge) (bool, Error) {
+	uid gregor1.UID, expunge chat1.Expunge) (*chat1.Expunge, Error) {
 
 	s.Debug(ctx, "applyExpunge(%v, %v, %v)", convID, uid, expunge.Upto)
 
@@ -588,9 +601,9 @@ func (s *Storage) applyExpunge(ctx context.Context, convID chat1.ConversationID,
 		if err != nil {
 			de("failed to store delh track: %v", err)
 		}
-		return false, nil
+		return nil, nil
 	default:
-		return false, err
+		return nil, err
 	}
 
 	var writeback []chat1.MessageUnboxed
@@ -618,7 +631,7 @@ func (s *Storage) applyExpunge(ctx context.Context, convID chat1.ConversationID,
 	err = s.engine.WriteMessages(ctx, convID, uid, writeback)
 	if err != nil {
 		de("write messages failed: %v", err)
-		return false, err
+		return nil, err
 	}
 
 	err = s.delhTracker.setDeletedUpto(ctx, convID, uid, expunge.Upto)
@@ -626,7 +639,7 @@ func (s *Storage) applyExpunge(ctx context.Context, convID chat1.ConversationID,
 		de("failed to store delh track: %v", err)
 	}
 
-	return true, nil
+	return &expunge, nil
 }
 
 func (s *Storage) ResultCollectorFromQuery(ctx context.Context, query *chat1.GetThreadQuery,
@@ -648,6 +661,11 @@ func (s *Storage) ResultCollectorFromQuery(ctx context.Context, query *chat1.Get
 func (s *Storage) fetchUpToMsgIDLocked(ctx context.Context, rc ResultCollector,
 	convID chat1.ConversationID, uid gregor1.UID, msgID chat1.MessageID, query *chat1.GetThreadQuery,
 	pagination *chat1.Pagination) (chat1.ThreadView, Error) {
+
+	var err Error
+	if err = isAbortedRequest(ctx); err != nil {
+		return chat1.ThreadView{}, err
+	}
 	// Fetch secret key
 	key, ierr := getSecretBoxKey(ctx, s.G().ExternalG(), DefaultSecretUI)
 	if ierr != nil {
@@ -656,10 +674,9 @@ func (s *Storage) fetchUpToMsgIDLocked(ctx context.Context, rc ResultCollector,
 	}
 
 	// Init storage engine first
-	var err Error
 	ctx, err = s.engine.Init(ctx, key, convID, uid)
 	if err != nil {
-		return chat1.ThreadView{}, s.MaybeNuke(false, err, convID, uid)
+		return chat1.ThreadView{}, s.MaybeNuke(ctx, false, err, convID, uid)
 	}
 
 	// Calculate seek parameters
@@ -676,14 +693,14 @@ func (s *Storage) fetchUpToMsgIDLocked(ctx context.Context, rc ResultCollector,
 		} else if len(pagination.Next) > 0 {
 			if derr := decode(pagination.Next, &pid); derr != nil {
 				err = RemoteError{Msg: "Fetch: failed to decode pager: " + derr.Error()}
-				return chat1.ThreadView{}, s.MaybeNuke(false, err, convID, uid)
+				return chat1.ThreadView{}, s.MaybeNuke(ctx, false, err, convID, uid)
 			}
 			maxID = pid - 1
 			s.Debug(ctx, "Fetch: next pagination: pid: %d", pid)
 		} else {
 			if derr := decode(pagination.Previous, &pid); derr != nil {
 				err = RemoteError{Msg: "Fetch: failed to decode pager: " + derr.Error()}
-				return chat1.ThreadView{}, s.MaybeNuke(false, err, convID, uid)
+				return chat1.ThreadView{}, s.MaybeNuke(ctx, false, err, convID, uid)
 			}
 			maxID = chat1.MessageID(int(pid) + num)
 			s.Debug(ctx, "Fetch: prev pagination: pid: %d", pid)
@@ -698,11 +715,16 @@ func (s *Storage) fetchUpToMsgIDLocked(ctx context.Context, rc ResultCollector,
 	s.Debug(ctx, "Fetch: using result collector: %s", rc)
 
 	// Run seek looking for all the messages
-	var res []chat1.MessageUnboxed
 	if err = s.engine.ReadMessages(ctx, rc, convID, uid, maxID); err != nil {
 		return chat1.ThreadView{}, err
 	}
-	res = rc.Result()
+	msgs := rc.Result()
+
+	// Clear out any ephemeral messages that have exploded before we hand these
+	// messages out.
+	if err := s.explodeExpiredMessages(ctx, convID, uid, msgs); err != nil {
+		return chat1.ThreadView{}, err
+	}
 
 	// Get the stored latest point upto which has been deleted.
 	// `maxDeletedUpto` can be behind the times, so the pager is patched later in ConvSource.
@@ -720,16 +742,16 @@ func (s *Storage) fetchUpToMsgIDLocked(ctx context.Context, rc ResultCollector,
 	// Form paged result
 	var tres chat1.ThreadView
 	var pmsgs []pager.Message
-	for _, m := range res {
+	for _, m := range msgs {
 		pmsgs = append(pmsgs, m)
 	}
 	if tres.Pagination, ierr = pager.NewThreadPager().MakePage(pmsgs, num, maxDeletedUpto); ierr != nil {
 		return chat1.ThreadView{},
 			NewInternalError(ctx, s.DebugLabeler, "Fetch: failed to encode pager: %s", ierr.Error())
 	}
-	tres.Messages = res
+	tres.Messages = msgs
 
-	s.Debug(ctx, "Fetch: cache hit: num: %d", len(res))
+	s.Debug(ctx, "Fetch: cache hit: num: %d", len(msgs))
 	return tres, nil
 }
 
@@ -737,7 +759,7 @@ func (s *Storage) FetchUpToLocalMaxMsgID(ctx context.Context,
 	convID chat1.ConversationID, uid gregor1.UID, rc ResultCollector, query *chat1.GetThreadQuery,
 	pagination *chat1.Pagination) (res chat1.ThreadView, err Error) {
 	// All public functions get locks to make access to the database single threaded.
-	// They should never be called from private functons.
+	// They should never be called from private functions.
 	locks.Storage.Lock()
 	defer locks.Storage.Unlock()
 	defer s.Trace(ctx, func() error { return err }, "FetchUpToLocalMaxMsgID")()
@@ -754,7 +776,7 @@ func (s *Storage) FetchUpToLocalMaxMsgID(ctx context.Context,
 func (s *Storage) Fetch(ctx context.Context, conv chat1.Conversation,
 	uid gregor1.UID, rc ResultCollector, query *chat1.GetThreadQuery, pagination *chat1.Pagination) (res chat1.ThreadView, err Error) {
 	// All public functions get locks to make access to the database single threaded.
-	// They should never be called from private functons.
+	// They should never be called from private functions.
 	locks.Storage.Lock()
 	defer locks.Storage.Unlock()
 	defer s.Trace(ctx, func() error { return err }, "Fetch")()
@@ -766,7 +788,9 @@ func (s *Storage) Fetch(ctx context.Context, conv chat1.Conversation,
 func (s *Storage) FetchMessages(ctx context.Context, convID chat1.ConversationID,
 	uid gregor1.UID, msgIDs []chat1.MessageID) (res []*chat1.MessageUnboxed, err Error) {
 	defer s.Trace(ctx, func() error { return err }, "FetchMessages")()
-
+	if err = isAbortedRequest(ctx); err != nil {
+		return res, err
+	}
 	// Fetch secret key
 	key, ierr := getSecretBoxKey(ctx, s.G().ExternalG(), DefaultSecretUI)
 	if ierr != nil {
@@ -776,7 +800,7 @@ func (s *Storage) FetchMessages(ctx context.Context, convID chat1.ConversationID
 	// Init storage engine first
 	ctx, err = s.engine.Init(ctx, key, convID, uid)
 	if err != nil {
-		return nil, s.MaybeNuke(false, err, convID, uid)
+		return nil, s.MaybeNuke(ctx, false, err, convID, uid)
 	}
 
 	// Run seek looking for each message
@@ -788,7 +812,7 @@ func (s *Storage) FetchMessages(ctx context.Context, convID chat1.ConversationID
 				res = append(res, nil)
 				continue
 			} else {
-				return nil, s.MaybeNuke(false, err, convID, uid)
+				return nil, s.MaybeNuke(ctx, false, err, convID, uid)
 			}
 		}
 		sres = rc.Result()

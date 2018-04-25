@@ -10,7 +10,7 @@ import {
   PopupDialog,
 } from '../../common-adapters'
 import {globalStyles, globalMargins, globalColors, isMobile, desktopStyles} from '../../styles'
-import capitalize from 'lodash/capitalize'
+import {capitalize} from 'lodash-es'
 import UserInput from '../../search/user-input/container'
 import SearchResultsList from '../../search/results-list/container'
 
@@ -39,6 +39,7 @@ type Props = {
   onRoleChange: (role: TeamRoleType) => void,
   name: string,
   role: TeamRoleType,
+  showSearchPending: boolean,
   sendNotification: boolean,
   setSendNotification: (sendNotification: boolean) => void,
 }

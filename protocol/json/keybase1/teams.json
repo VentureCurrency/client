@@ -273,20 +273,6 @@
     },
     {
       "type": "record",
-      "name": "UserVersion",
-      "fields": [
-        {
-          "type": "UID",
-          "name": "uid"
-        },
-        {
-          "type": "Seqno",
-          "name": "eldestSeqno"
-        }
-      ]
-    },
-    {
-      "type": "record",
       "name": "UserVersionPercentForm",
       "fields": [],
       "typedef": "string"
@@ -835,6 +821,27 @@
     },
     {
       "type": "record",
+      "name": "TeamCLKRResetUser",
+      "fields": [
+        {
+          "type": "UID",
+          "name": "uid"
+        },
+        {
+          "type": "Seqno",
+          "name": "userEldestSeqno",
+          "jsonkey": "user_eldest"
+        },
+        {
+          "type": "Seqno",
+          "name": "memberEldestSeqno",
+          "jsonkey": "member_eldest"
+        }
+      ],
+      "lint": "ignore"
+    },
+    {
+      "type": "record",
       "name": "TeamCLKRMsg",
       "fields": [
         {
@@ -849,6 +856,14 @@
         {
           "type": "int",
           "name": "score"
+        },
+        {
+          "type": {
+            "type": "array",
+            "items": "TeamCLKRResetUser"
+          },
+          "name": "resetUsersUntrusted",
+          "jsonkey": "reset_users"
         }
       ],
       "lint": "ignore"
@@ -1284,6 +1299,10 @@
         {
           "type": "boolean",
           "name": "staleOK"
+        },
+        {
+          "type": "boolean",
+          "name": "allowNameLookupBurstCache"
         }
       ]
     },
@@ -1345,6 +1364,16 @@
           "type": "int",
           "name": "memberCount",
           "jsonkey": "member_count"
+        },
+        {
+          "type": "boolean",
+          "name": "allowProfilePromote",
+          "jsonkey": "allow_profile_promote"
+        },
+        {
+          "type": "boolean",
+          "name": "isMemberShowcased",
+          "jsonkey": "is_member_showcased"
         }
       ]
     },
@@ -1428,6 +1457,16 @@
         {
           "type": "boolean",
           "name": "active"
+        },
+        {
+          "type": "boolean",
+          "name": "allowProfilePromote",
+          "jsonkey": "allow_profile_promote"
+        },
+        {
+          "type": "boolean",
+          "name": "isMemberShowcased",
+          "jsonkey": "is_member_showcased"
         }
       ]
     },
@@ -1760,6 +1799,10 @@
         },
         {
           "type": "boolean",
+          "name": "chat"
+        },
+        {
+          "type": "boolean",
           "name": "deleteChannel"
         },
         {
@@ -1777,6 +1820,10 @@
         {
           "type": "boolean",
           "name": "setMemberShowcase"
+        },
+        {
+          "type": "boolean",
+          "name": "setRetentionPolicy"
         },
         {
           "type": "boolean",
@@ -2128,6 +2175,13 @@
         {
           "name": "sessionID",
           "type": "int"
+        },
+        {
+          "name": "teamName",
+          "type": [
+            null,
+            "string"
+          ]
         }
       ],
       "response": {

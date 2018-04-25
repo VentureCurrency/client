@@ -2,7 +2,7 @@
 import * as React from 'react'
 import {Box, Button, ClickableBox, Dropdown, Input, PopupDialog, Text, ButtonBar} from '../../common-adapters'
 import {globalStyles, globalMargins, globalColors, isMobile} from '../../styles'
-import capitalize from 'lodash/capitalize'
+import {capitalize} from 'lodash-es'
 import {teamRoleTypes} from '../../constants/teams'
 import {type TeamRoleType} from '../../constants/types/teams'
 
@@ -77,6 +77,7 @@ const InviteByEmail = (props: Props) => (
                 props.onRoleChange(selectedRole)
               )
             }
+            underlayColor="rgba(0, 0, 0, 0)"
           >
             <Dropdown
               items={_makeDropdownItems()}

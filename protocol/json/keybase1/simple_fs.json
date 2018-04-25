@@ -4,6 +4,10 @@
     {
       "path": "common.avdl",
       "type": "idl"
+    },
+    {
+      "path": "kbfs_common.avdl",
+      "type": "idl"
     }
   ],
   "types": [
@@ -73,6 +77,10 @@
         {
           "type": "DirentType",
           "name": "direntType"
+        },
+        {
+          "type": "User",
+          "name": "lastWriterUnverified"
         }
       ]
     },
@@ -145,6 +153,14 @@
       ]
     },
     {
+      "type": "enum",
+      "name": "ListFilter",
+      "symbols": [
+        "NO_FILTER_0",
+        "FILTER_ALL_HIDDEN_1"
+      ]
+    },
+    {
       "type": "record",
       "name": "ListArgs",
       "fields": [
@@ -155,6 +171,10 @@
         {
           "type": "Path",
           "name": "path"
+        },
+        {
+          "type": "ListFilter",
+          "name": "filter"
         }
       ]
     },
@@ -360,6 +380,10 @@
         {
           "name": "path",
           "type": "Path"
+        },
+        {
+          "name": "filter",
+          "type": "ListFilter"
         }
       ],
       "response": null,
@@ -374,6 +398,10 @@
         {
           "name": "path",
           "type": "Path"
+        },
+        {
+          "name": "filter",
+          "type": "ListFilter"
         }
       ],
       "response": null,
@@ -601,6 +629,16 @@
       ],
       "response": null,
       "doc": "Blocking wait for the pending operation to finish"
+    },
+    "simpleFSDumpDebuggingInfo": {
+      "request": [],
+      "response": null,
+      "doc": "Instructs KBFS to dump debugging info into its logs."
+    },
+    "simpleFSSyncStatus": {
+      "request": [],
+      "response": "FSSyncStatus",
+      "doc": "Get sync status."
     }
   },
   "namespace": "keybase.1"

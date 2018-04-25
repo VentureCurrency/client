@@ -1,9 +1,8 @@
 // @flow
 import * as React from 'react'
-import {findDOMNode} from 'react-dom'
 import Box from './box'
 import Text, {getStyle as getTextStyle} from './text.desktop'
-import {globalStyles, globalColors, globalMargins, platformStyles} from '../styles'
+import {collapseStyles, globalStyles, globalColors, globalMargins, platformStyles} from '../styles'
 
 import type {Props} from './input'
 
@@ -14,7 +13,7 @@ type State = {
 
 class Input extends React.PureComponent<Props, State> {
   state: State
-  _input: *
+  _input: HTMLTextAreaElement | HTMLInputElement | null
   _isComposingIME: boolean = false
 
   constructor(props: Props) {
@@ -26,18 +25,15 @@ class Input extends React.PureComponent<Props, State> {
     }
   }
 
-  setNativeProps(props: Object) {
-    throw new Error('Only implemented on RN')
-  }
-
   componentDidMount() {
     this._autoResize()
   }
 
-  componentWillReceiveProps(nextProps: Props) {
+  static getDerivedStateFromProps(nextProps: Props, prevState: State) {
     if (nextProps.hasOwnProperty('value')) {
-      this.setState({value: nextProps.value || ''})
+      return {value: nextProps.value || ''}
     }
+    return null
   }
 
   componentDidUpdate(prevProps: Props, prevState: State) {
@@ -59,9 +55,9 @@ class Input extends React.PureComponent<Props, State> {
   }
 
   selections = () => {
-    const node = this._input && this._inputNode()
-    if (node) {
-      const {selectionStart, selectionEnd} = node
+    const n = this._input
+    if (n) {
+      const {selectionStart, selectionEnd} = n
       return {selectionStart, selectionEnd}
     }
   }
@@ -83,15 +79,15 @@ class Input extends React.PureComponent<Props, State> {
       return
     }
 
-    const node = this._inputNode()
-    if (!node || !node.style) {
+    const n = this._input
+    if (!n || !n.style) {
       return
     }
 
     // Try and not style/render thrash. We bookkeep the length of the string that was used to go up a line and if we shorten our length
     // we'll remeasure. It's very expensive to just remeasure as the user is typing. it causes a lot of actual layout thrashing
     if (this.props.smartAutoresize) {
-      const rect = node.getBoundingClientRect()
+      const rect = n.getBoundingClientRect()
       // width changed so throw out our data
       if (rect.width !== this._smartAutoresize.width) {
         this._smartAutoresize.width = rect.width
@@ -99,9 +95,9 @@ class Input extends React.PureComponent<Props, State> {
       }
 
       // See if we've gone up in size, if so keep track of the input at that point
-      if (node.scrollHeight > rect.height) {
+      if (n.scrollHeight > rect.height) {
         this._smartAutoresize.pivotLength = this.state.value.length
-        node.style.height = `${node.scrollHeight}px`
+        n.style.height = `${n.scrollHeight}px`
       } else {
         // see if we went back down in height
         if (
@@ -109,62 +105,46 @@ class Input extends React.PureComponent<Props, State> {
           this.state.value.length <= this._smartAutoresize.pivotLength
         ) {
           this._smartAutoresize.pivotLength = -1
-          node.style.height = '1px'
-          node.style.height = `${node.scrollHeight}px`
+          n.style.height = '1px'
+          n.style.height = `${n.scrollHeight}px`
         }
       }
     } else {
-      node.style.height = '1px'
-      node.style.height = `${node.scrollHeight}px`
+      n.style.height = '1px'
+      n.style.height = `${n.scrollHeight}px`
     }
-  }
-
-  _inputNode = (): HTMLTextAreaElement | HTMLInputElement | null => {
-    const node = findDOMNode(this._input)
-
-    if (node instanceof HTMLTextAreaElement) {
-      return node
-    }
-    if (node instanceof HTMLInputElement) {
-      return node
-    }
-
-    return null
   }
 
   focus = () => {
-    const n = this._input && this._inputNode()
+    const n = this._input
     n && n.focus()
   }
 
   select = () => {
-    const n = this._input && this._inputNode()
+    const n = this._input
     n && n.select()
   }
 
   blur = () => {
-    const n = this._input && this._inputNode()
+    const n = this._input
     n && n.blur()
   }
 
   moveCursorToEnd = () => {
-    const n = this._input && this._inputNode()
+    const n = this._input
     if (n && this.props.value) {
       n.selectionStart = n.selectionEnd = this.props.value.length
     }
   }
 
-  insertTextAtCursor = (text: string) => {
-    const n = this._input && this._inputNode()
-    const selections = this.selections()
-    if (n && selections) {
-      const {selectionStart, selectionEnd} = selections
-      this.replaceText(text, selectionStart, selectionEnd)
-    }
-  }
-
-  replaceText = (text: string, startIdx: number, endIdx: number) => {
-    const n = this._input && this._inputNode()
+  replaceText = (
+    text: string,
+    startIdx: number,
+    endIdx: number,
+    newSelectionStart: number,
+    newSelectionEnd: number
+  ) => {
+    const n = this._input
     if (n) {
       const v = n.value
       const nextValue = v.slice(0, startIdx) + text + v.slice(endIdx)
@@ -173,6 +153,8 @@ class Input extends React.PureComponent<Props, State> {
       this._autoResize()
 
       this.props.onChangeText && this.props.onChangeText(nextValue || '')
+      n.selectionStart = newSelectionStart
+      n.selectionEnd = newSelectionEnd
     }
   }
 
@@ -330,29 +312,31 @@ class Input extends React.PureComponent<Props, State> {
 
     const singlelineProps = {
       ...commonProps,
-      style: {...inputStyle, ...this.props.inputStyle},
+      style: collapseStyles([inputStyle, this.props.inputStyle]),
       type: this._propTypeToSingleLineType(),
     }
 
     const multilineProps = {
       ...commonProps,
       rows: this.props.rowsMin || defaultRowsToShow,
-      style: {...textareaStyle, ...this.props.inputStyle},
+      style: collapseStyles([textareaStyle, this.props.inputStyle]),
     }
 
-    const smallLabelStyle = {
-      ...globalStyles.fontSemibold,
-      fontSize: _bodySmallTextStyle.fontSize,
-      lineHeight: `${_lineHeight}px`,
-      marginRight: 8,
-      color: globalColors.blue,
-      ...this.props.smallLabelStyle,
-    }
+    const smallLabelStyle = collapseStyles([
+      globalStyles.fontSemibold,
+      {
+        fontSize: _bodySmallTextStyle.fontSize,
+        lineHeight: `${_lineHeight}px`,
+        marginRight: 8,
+        color: globalColors.blue,
+      },
+      this.props.smallLabelStyle,
+    ])
 
     const inputRealCSS = `::-webkit-input-placeholder { color: rgba(0,0,0,.2); }`
 
     return (
-      <Box style={{...containerStyle, ...this.props.style}}>
+      <Box style={collapseStyles([containerStyle, this.props.style])}>
         <style>{inputRealCSS}</style>
         {!this.props.small && (
           <Text type="BodySmallSemibold" style={_floatingStyle}>
@@ -368,7 +352,7 @@ class Input extends React.PureComponent<Props, State> {
         {this.props.multiline ? <textarea {...multilineProps} /> : <input {...singlelineProps} />}
         {!!this.props.errorText &&
           !this.props.small && (
-            <Text type="BodyError" style={{..._errorStyle, ...this.props.errorStyle}}>
+            <Text type="BodyError" style={collapseStyles([_errorStyle, this.props.errorStyle])}>
               {this.props.errorText}
             </Text>
           )}
