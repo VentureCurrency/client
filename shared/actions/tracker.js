@@ -11,7 +11,7 @@ import openUrl from '../util/open-url'
 import {requestIdleCallback} from '../util/idle-callback'
 import {isMobile} from '../constants/platform'
 import {type TypedState} from '../constants/reducer'
-import type {FriendshipUserInfo} from '../profile/friendships'
+import type {FriendshipUserInfo} from '../constants/types/profile'
 
 // Send a heartbeat while trackers are still open
 function* _trackerTimer(): Generator<any, void, any> {
@@ -64,7 +64,7 @@ function _getMyProfile(action: TrackerGen.GetMyProfilePayload, state: TypedState
 const triggerIdentify = (uid: string = '', userAssertion: string = '', forceDisplay: boolean = false) => (
   dispatch: Dispatch,
   getState: () => TypedState
-): Promise<*> =>
+) =>
   new Promise((resolve, reject) => {
     dispatch(TrackerGen.createIdentifyStarted({username: uid || userAssertion}))
     RPCTypes.identifyIdentify2RpcPromise({

@@ -464,6 +464,14 @@ func (a AppStatusError) Error() string {
 	return fmt.Sprintf("%s%s (error %d)", a.Desc, fields, a.Code)
 }
 
+func IsAppStatusErrorCode(err error, code keybase1.StatusCode) bool {
+	switch err := err.(type) {
+	case AppStatusError:
+		return err.Code == int(code)
+	}
+	return false
+}
+
 //=============================================================================
 
 type GpgError struct {
@@ -558,7 +566,7 @@ type LoggedInWrongUserError struct {
 }
 
 func (e LoggedInWrongUserError) Error() string {
-	return fmt.Sprintf("Logged in as %q, attempting to log in as %q:  try logout first", e.ExistingName, e.AttemptedName)
+	return fmt.Sprintf("Logged in as %q, attempting to log in as %q: try logout first", e.ExistingName, e.AttemptedName)
 }
 
 //=============================================================================
@@ -807,17 +815,26 @@ func (d DecryptWrongReceiverError) Error() string {
 	return "Bad receiver key"
 }
 
-type DecryptOpenError struct{}
+type DecryptOpenError struct {
+	What string
+}
+
+func NewDecryptOpenError(what string) DecryptOpenError {
+	return DecryptOpenError{What: what}
+}
 
 func (d DecryptOpenError) Error() string {
-	return "box.Open failure; ciphertext was corrupted or wrong key"
+	if len(d.What) == 0 {
+		return "box.Open failure; ciphertext was corrupted or wrong key"
+	}
+	return fmt.Sprintf("failed to decrypt '%s'; ciphertext was corrupted or wrong key", d.What)
 }
 
 //=============================================================================
 
-type NoConfigFile struct{}
+type NoConfigFileError struct{}
 
-func (n NoConfigFile) Error() string {
+func (n NoConfigFileError) Error() string {
 	return "No configuration file available"
 }
 
@@ -964,6 +981,10 @@ func (u UIDMismatchError) Error() string {
 	return fmt.Sprintf("UID mismatch error: %s", u.Msg)
 }
 
+func NewUIDMismatchError(m string) UIDMismatchError {
+	return UIDMismatchError{Msg: m}
+}
+
 //=============================================================================
 
 type KeyRevokedError struct {
@@ -1014,6 +1035,14 @@ type ChainLinkError struct {
 
 func (c ChainLinkError) Error() string {
 	return fmt.Sprintf("Error in parsing chain Link: %s", c.msg)
+}
+
+type ChainLinkStubbedUnsupportedError struct {
+	msg string
+}
+
+func (c ChainLinkStubbedUnsupportedError) Error() string {
+	return c.msg
 }
 
 type SigchainV2Error struct {
@@ -2290,5 +2319,11 @@ func (e TeamProvisionalError) Error() string {
 func NewTeamProvisionalError(canKey bool, isPublic bool, dn string) error {
 	return TeamProvisionalError{canKey, isPublic, dn}
 }
+
+//=============================================================================
+
+type NoActiveDeviceError struct{}
+
+func (e NoActiveDeviceError) Error() string { return "no active device" }
 
 //=============================================================================

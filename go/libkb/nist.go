@@ -23,9 +23,9 @@ import (
 // we're more responsive when we come back from backgrounding, etc.
 //
 
-// If we're within 5 minutes of expiration, generate a new NIST
-const nistExpirationMargin = time.Minute * 5
-const nistLifetime = 28 * time.Hour
+// If we're within 26 hours of expiration, generate a new NIST;
+const nistExpirationMargin = 26 * time.Hour // I.e., half of the lifetime
+const nistLifetime = 52 * time.Hour         // A little longer than 2 days.
 const nistSessionIDLength = 16
 const nistShortHashLen = 19
 
@@ -86,23 +86,50 @@ func (f *NISTFactory) NIST(ctx context.Context) (ret *NIST, err error) {
 	f.Lock()
 	defer f.Unlock()
 
-	if f.nist == nil || f.nist.IsExpired() || f.nist.DidFail() {
+	makeNew := true
+
+	if f.nist == nil {
+		f.G().Log.CDebugf(ctx, "| NISTFactory#NIST: nil NIST, making new one")
+	} else if f.nist.DidFail() {
+		f.G().Log.CDebugf(ctx, "| NISTFactory#NIST: NIST previously failed, so we'll make a new one")
+	} else {
+		valid, until := f.nist.IsStillValid()
+		if valid {
+			f.G().Log.CDebugf(ctx, "| NISTFactory#NIST: returning existing NIST (expires conservatively in %s, expiresAt: %s)", until, f.nist.expiresAt)
+			makeNew = false
+		} else {
+			f.G().Log.CDebugf(ctx, "| NISTFactory#NIST: NIST expired (conservatively) %s ago, making a new one (expiresAt: %s)", -until, f.nist.expiresAt)
+		}
+	}
+
+	if makeNew {
 		ret = newNIST(f.G())
 		err = ret.generate(ctx, f.uid, f.deviceID, f.key)
 		if err != nil {
 			return nil, err
 		}
 		f.nist = ret
+		f.G().Log.CDebugf(ctx, "| NISTFactory#NIST: Installing new NIST; expiresAt: %s", f.nist.expiresAt)
 	}
 
 	return f.nist, nil
 }
 
-func (n *NIST) IsExpired() bool {
+func durationToSeconds(d time.Duration) int64 {
+	return int64(d / time.Second)
+}
+
+func (n *NIST) IsStillValid() (bool, time.Duration) {
 	n.RLock()
 	defer n.RUnlock()
-	conservativeExpiration := n.expiresAt.Add(-nistExpirationMargin)
-	return !conservativeExpiration.After(n.G().Clock().Now())
+	now := ForceWallClock(n.G().Clock().Now())
+	diff := n.expiresAt.Sub(now) - nistExpirationMargin
+	return (diff > 0), diff
+}
+
+func (n *NIST) IsExpired() bool {
+	isValid, _ := n.IsStillValid()
+	return !isValid
 }
 
 func (n *NIST) DidFail() bool {
@@ -220,7 +247,7 @@ func (n *NIST) generate(ctx context.Context, uid keybase1.UID, deviceID keybase1
 		Hostname:  CanonicalHost,
 		UID:       uid.ToBytes(),
 		Generated: generated.Unix(),
-		Lifetime:  nistLifetime.Nanoseconds() / 1000000000,
+		Lifetime:  durationToSeconds(nistLifetime),
 		KID:       key.GetBinaryKID(),
 	}
 	payload.DeviceID, err = hex.DecodeString(string(deviceID))
@@ -265,7 +292,7 @@ func (n *NIST) generate(ctx context.Context, uid keybase1.UID, deviceID keybase1
 
 	n.long = longTmp
 	n.short = shortTmp
-	n.expiresAt = expires
+	n.expiresAt = ForceWallClock(expires)
 
 	return nil
 }

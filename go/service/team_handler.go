@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/context"
 
@@ -25,6 +26,8 @@ const teamHandlerName = "teamHandler"
 type teamHandler struct {
 	libkb.Contextified
 	badger *badges.Badger
+
+	teamRotateLock sync.Mutex // work on one rotation at a time
 }
 
 var _ libkb.GregorInBandMessageHandler = (*teamHandler)(nil)
@@ -58,6 +61,8 @@ func (r *teamHandler) Create(ctx context.Context, cli gregor1.IncomingInterface,
 		return true, r.memberOutFromReset(ctx, cli, item)
 	case "team.abandoned":
 		return true, r.abandonTeam(ctx, cli, item)
+	case "team.newly_added_to_team":
+		return true, nil
 	default:
 		if strings.HasPrefix(category, "team.") {
 			return false, fmt.Errorf("unknown teamHandler category: %q", category)
@@ -75,12 +80,33 @@ func (r *teamHandler) rotateTeam(ctx context.Context, cli gregor1.IncomingInterf
 	}
 	r.G().Log.CDebugf(ctx, "team.clkr unmarshaled: %+v", msg)
 
-	if err := teams.HandleRotateRequest(ctx, r.G(), msg); err != nil {
-		return err
+	for _, uv := range msg.ResetUsersUntrusted {
+		// We don't use UIDMapper in HandleRotateRequest, but since
+		// server just told us that these users have reset, we might
+		// as well use that knowledge to refresh cache.
+
+		// Use ClearUIDAtEldestSeqno instead of InformOfEldestSeqno
+		// because usually uv.UserEldestSeqno (the "new EldestSeqno")
+		// will be 0, because user has just reset and hasn't
+		// reprovisioned yet
+
+		r.G().UIDMapper.ClearUIDAtEldestSeqno(ctx, r.G(), uv.Uid, uv.MemberEldestSeqno)
 	}
 
-	r.G().Log.CDebugf(ctx, "dismissing team.clkr item since rotate succeeded")
-	return r.G().GregorDismisser.DismissItem(ctx, cli, item.Metadata().MsgID())
+	go func() {
+		r.teamRotateLock.Lock()
+		defer r.teamRotateLock.Unlock()
+
+		if err := teams.HandleRotateRequest(ctx, r.G(), msg); err != nil {
+			r.G().Log.CDebugf(ctx, "HandleRotateRequest failed with error: %s", err)
+			return
+		}
+
+		r.G().Log.CDebugf(ctx, "dismissing team.clkr item since rotate succeeded")
+		r.G().GregorDismisser.DismissItem(ctx, cli, item.Metadata().MsgID())
+	}()
+
+	return nil
 }
 
 func (r *teamHandler) memberOutFromReset(ctx context.Context, cli gregor1.IncomingInterface, item gregor.Item) error {

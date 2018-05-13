@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keybase/client/go/chat/pager"
+
 	"github.com/keybase/client/go/chat/globals"
 	"github.com/keybase/client/go/chat/types"
 	"github.com/keybase/client/go/chat/utils"
@@ -28,6 +30,10 @@ import (
 type ChatTestContext struct {
 	libkb.TestContext
 	ChatG *globals.ChatContext
+}
+
+func NewMetaContextForTest(c ChatTestContext) libkb.MetaContext {
+	return libkb.NewMetaContextForTest(c.TestContext)
 }
 
 func (c ChatTestContext) Context() *globals.Context {
@@ -463,6 +469,14 @@ func (m *ChatRemoteMock) GetThreadRemote(ctx context.Context, arg chat1.GetThrea
 	}
 	if arg.Query != nil && arg.Query.MarkAsRead {
 		m.readMsgid[arg.ConversationID.String()] = msgs[0].ServerHeader.MessageID
+	}
+	var pmsgs []pager.Message
+	for _, m := range res.Thread.Messages {
+		pmsgs = append(pmsgs, m)
+	}
+	res.Thread.Pagination, err = pager.NewThreadPager().MakePage(pmsgs, arg.Pagination.Num, 0)
+	if err != nil {
+		return res, err
 	}
 	return res, nil
 }
@@ -1004,4 +1018,14 @@ func (c *ChatUI) ChatSearchHit(ctx context.Context, arg chat1.ChatSearchHitArg) 
 func (c *ChatUI) ChatSearchDone(ctx context.Context, arg chat1.ChatSearchDoneArg) error {
 	c.searchDoneCb <- arg
 	return nil
+}
+
+type DummyAssetDeleter struct{}
+
+func NewDummyAssetDeleter() DummyAssetDeleter {
+	return DummyAssetDeleter{}
+}
+
+// DeleteAssets implements github.com/keybase/go/chat/storage/storage.AssetDeleter interface.
+func (d DummyAssetDeleter) DeleteAssets(ctx context.Context, uid gregor1.UID, convID chat1.ConversationID, assets []chat1.Asset) {
 }

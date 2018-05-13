@@ -325,7 +325,8 @@ func (d *Service) RunBackgroundOperations(uir *UIRouter) {
 	// These are all background-ish operations that the service performs.
 	// We should revisit these on mobile, or at least, when mobile apps are
 	// backgrounded.
-	d.tryLogin()
+	ctx := context.Background()
+	d.tryLogin(ctx)
 	d.hourlyChecks()
 	d.slowChecks() // 6 hours
 	d.createChatModules()
@@ -367,10 +368,11 @@ func (d *Service) createChatModules() {
 
 	// Set up main chat data sources
 	boxer := chat.NewBoxer(g)
-	chatStorage := storage.New(g)
+	chatStorage := storage.New(g, nil)
 	g.InboxSource = chat.NewInboxSource(g, g.Env.GetInboxSourceType(), ri)
 	g.ConvSource = chat.NewConversationSource(g, g.Env.GetConvSourceType(),
 		boxer, chatStorage, ri)
+	chatStorage.SetAssetDeleter(g.ConvSource)
 	g.Searcher = chat.NewSearcher(g)
 	g.ServerCacheVersions = storage.NewServerVersions(g)
 
@@ -437,7 +439,8 @@ func (d *Service) identifySelf() {
 		NeedProofSet:     true,
 	}
 	eng := engine.NewIdentify2WithUID(d.G(), &arg)
-	if err := engine.RunEngine(eng, &engine.Context{NetContext: context.Background()}); err != nil {
+	m := libkb.NewMetaContextBackground(d.G())
+	if err := engine.RunEngine2(m, eng); err != nil {
 		d.G().Log.Debug("identifySelf: identify error %s", err)
 	}
 	d.G().Log.Debug("identifySelf: identify success on uid %s", uid)
@@ -517,6 +520,8 @@ func (d *Service) addGlobalHooks() {
 
 func (d *Service) StartLoopbackServer() error {
 
+	ctx := context.Background()
+
 	var l net.Listener
 	var err error
 
@@ -530,7 +535,7 @@ func (d *Service) StartLoopbackServer() error {
 
 	// Make sure we have the same keys in memory in standalone mode as we do in
 	// regular service mode.
-	d.tryLogin()
+	d.tryLogin(ctx)
 
 	go d.ListenLoop(l)
 
@@ -556,7 +561,7 @@ func (d *Service) writeServiceInfo() error {
 }
 
 func (d *Service) chatEphemeralPurgeChecks() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := libkb.NewBgTicker(5 * time.Minute)
 	d.G().PushShutdownHook(func() error {
 		d.G().Log.Debug("stopping chatEphemeralPurgeChecks loop")
 		ticker.Stop()
@@ -573,7 +578,7 @@ func (d *Service) chatEphemeralPurgeChecks() {
 			d.G().Log.Debug("+ chat ephemeral purge loop")
 			g := globals.NewContext(d.G(), d.ChatG())
 			// Purge any conversations that have expired ephemeral messages
-			storage.New(g).QueueEphemeralBackgroundPurges(context.Background(), gregorUID)
+			storage.New(g, g.ConvSource).QueueEphemeralBackgroundPurges(context.Background(), gregorUID)
 			// Check the outbox for stuck ephemeral messages that need purging
 			storage.NewOutbox(g, gregorUID).EphemeralPurge(context.Background())
 			d.G().Log.Debug("- chat ephemeral chat loop")
@@ -582,39 +587,40 @@ func (d *Service) chatEphemeralPurgeChecks() {
 }
 
 func (d *Service) hourlyChecks() {
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := libkb.NewBgTicker(1 * time.Hour)
+	m := libkb.NewMetaContextBackground(d.G()).WithLogTag("HRLY")
 	d.G().PushShutdownHook(func() error {
-		d.G().Log.Debug("stopping hourlyChecks loop")
+		m.CDebugf("stopping hourlyChecks loop")
 		ticker.Stop()
 		return nil
 	})
 	go func() {
 		// do this quickly
-		if err := d.G().LogoutIfRevoked(); err != nil {
-			d.G().Log.Debug("LogoutIfRevoked error: %s", err)
+		if err := m.LogoutIfRevoked(); err != nil {
+			m.CDebugf("LogoutIfRevoked error: %s", err)
 		}
-		ekLib := d.G().GetEKLib()
-		ekLib.KeygenIfNeeded(context.Background())
+		ekLib := m.G().GetEKLib()
+		ekLib.KeygenIfNeeded(m.Ctx())
 		for {
 			<-ticker.C
-			d.G().Log.Debug("+ hourly check loop")
-			d.G().Log.Debug("| checking tracks on an hour timer")
-			libkb.CheckTracking(d.G())
+			m.CDebugf("+ hourly check loop")
+			m.CDebugf("| checking tracks on an hour timer")
+			libkb.CheckTracking(m.G())
 
-			ekLib := d.G().GetEKLib()
-			d.G().Log.Debug("| checking if ephemeral keys need to be created or deleted")
-			ekLib.KeygenIfNeeded(context.Background())
-			d.G().Log.Debug("| checking if current device revoked")
-			if err := d.G().LogoutIfRevoked(); err != nil {
-				d.G().Log.Debug("LogoutIfRevoked error: %s", err)
+			ekLib := m.G().GetEKLib()
+			m.CDebugf("| checking if ephemeral keys need to be created or deleted")
+			ekLib.KeygenIfNeeded(m.Ctx())
+			m.CDebugf("| checking if current device revoked")
+			if err := m.LogoutIfRevoked(); err != nil {
+				m.CDebugf("LogoutIfRevoked error: %s", err)
 			}
-			d.G().Log.Debug("- hourly check loop")
+			m.CDebugf("- hourly check loop")
 		}
 	}()
 }
 
 func (d *Service) slowChecks() {
-	ticker := time.NewTicker(6 * time.Hour)
+	ticker := libkb.NewBgTicker(6 * time.Hour)
 	d.G().PushShutdownHook(func() error {
 		d.G().Log.Debug("stopping slowChecks loop")
 		ticker.Stop()
@@ -688,10 +694,10 @@ func (d *Service) runBackgroundPerUserKeyUpgrade() {
 
 	eng := engine.NewPerUserKeyUpgradeBackground(d.G(), &engine.PerUserKeyUpgradeBackgroundArgs{})
 	go func() {
-		ectx := &engine.Context{NetContext: context.Background()}
-		err := engine.RunEngine(eng, ectx)
+		m := libkb.NewMetaContextBackground(d.G())
+		err := engine.RunEngine2(m, eng)
 		if err != nil {
-			d.G().Log.Warning("per-user-key background upgrade error: %v", err)
+			m.CWarningf("per-user-key background upgrade error: %v", err)
 		}
 	}()
 
@@ -705,10 +711,10 @@ func (d *Service) runBackgroundPerUserKeyUpgrade() {
 func (d *Service) runBackgroundPerUserKeyUpkeep() {
 	eng := engine.NewPerUserKeyUpkeepBackground(d.G(), &engine.PerUserKeyUpkeepBackgroundArgs{})
 	go func() {
-		ectx := &engine.Context{NetContext: context.Background()}
-		err := engine.RunEngine(eng, ectx)
+		m := libkb.NewMetaContextBackground(d.G())
+		err := engine.RunEngine2(m, eng)
 		if err != nil {
-			d.G().Log.Warning("per-user-key background upkeep error: %v", err)
+			m.CWarningf("per-user-key background upkeep error: %v", err)
 		}
 	}()
 
@@ -722,10 +728,10 @@ func (d *Service) runBackgroundPerUserKeyUpkeep() {
 func (d *Service) runBackgroundWalletInit() {
 	eng := engine.NewWalletInitBackground(d.G(), &engine.WalletInitBackgroundArgs{})
 	go func() {
-		ectx := &engine.Context{NetContext: context.Background()}
-		err := engine.RunEngine(eng, ectx)
+		m := libkb.NewMetaContextBackground(d.G())
+		err := engine.RunEngine2(m, eng)
 		if err != nil {
-			d.G().Log.Warning("background WalletInit error: %v", err)
+			m.CWarningf("background WalletInit error: %v", err)
 		}
 	}()
 
@@ -739,10 +745,10 @@ func (d *Service) runBackgroundWalletInit() {
 func (d *Service) runBackgroundWalletUpkeep() {
 	eng := engine.NewWalletUpkeepBackground(d.G(), &engine.WalletUpkeepBackgroundArgs{})
 	go func() {
-		ectx := &engine.Context{NetContext: context.Background()}
-		err := engine.RunEngine(eng, ectx)
+		m := libkb.NewMetaContextBackground(d.G())
+		err := engine.RunEngine2(m, eng)
 		if err != nil {
-			d.G().Log.Warning("background WalletUpkeep error: %v", err)
+			m.CWarningf("background WalletUpkeep error: %v", err)
 		}
 	}()
 
@@ -1080,13 +1086,13 @@ var tryLoginOnce sync.Once
 // If that fails for any reason, LoginProvisionedDevice is used, which should get
 // around any issue where the session.json file is out of date or missing since the
 // last time the service started.
-func (d *Service) tryLogin() {
+func (d *Service) tryLogin(ctx context.Context) {
 	tryLoginOnce.Do(func() {
 		eng := engine.NewLoginOffline(d.G())
-		ctx := &engine.Context{}
-		if err := engine.RunEngine(eng, ctx); err != nil {
-			d.G().Log.Debug("error running LoginOffline on service startup: %s", err)
-			d.G().Log.Debug("trying LoginProvisionedDevice")
+		m := libkb.NewMetaContext(ctx, d.G())
+		if err := engine.RunEngine2(m, eng); err != nil {
+			m.CDebugf("error running LoginOffline on service startup: %s", err)
+			m.CDebugf("trying LoginProvisionedDevice")
 
 			// Standalone mode quirk here. We call tryLogin when client is
 			// launched in standalone to unlock the same keys that we would
@@ -1098,21 +1104,18 @@ func (d *Service) tryLogin() {
 			// usage flags entirely. Then this will not be needed because
 			// Keyrings will always be loaded.
 
-			if d.G().Keyrings == nil {
-				d.G().Log.Debug("tryLogin: Configuring Keyrings")
-				d.G().ConfigureKeyring()
+			if m.G().Keyrings == nil {
+				m.CDebugf("tryLogin: Configuring Keyrings")
+				m.G().ConfigureKeyring()
 			}
 
 			deng := engine.NewLoginProvisionedDevice(d.G(), "")
 			deng.SecretStoreOnly = true
-			ctx := &engine.Context{
-				NetContext: context.Background(),
-			}
-			if err := engine.RunEngine(deng, ctx); err != nil {
-				d.G().Log.Debug("error running LoginProvisionedDevice on service startup: %s", err)
+			if err := engine.RunEngine2(m, deng); err != nil {
+				m.CDebugf("error running LoginProvisionedDevice on service startup: %s", err)
 			}
 		} else {
-			d.G().Log.Debug("success running LoginOffline on service startup")
+			m.CDebugf("success running LoginOffline on service startup")
 		}
 	})
 }

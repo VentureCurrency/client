@@ -24,11 +24,14 @@ import {chatTab} from '../../constants/tabs'
 import {isMobile} from '../../constants/platform'
 import {getPath} from '../../route-tree'
 import {NotifyPopup} from '../../native/notifications'
-import {showMainWindow, saveAttachmentDialog, downloadAndShowShareActionSheet} from '../platform-specific'
+import {
+  showMainWindow,
+  saveAttachmentToCameraRoll,
+  downloadAndShowShareActionSheet,
+} from '../platform-specific'
 import {tmpDir, downloadFilePath} from '../../util/file'
 import {privateFolderWithUsers, teamFolder} from '../../constants/config'
 import {parseFolderNameToUsers} from '../../util/kbfs'
-import flags from '../../util/feature-flags'
 
 const inboxQuery = {
   computeActiveList: true,
@@ -64,7 +67,7 @@ const inboxRefresh = (
           ['inboxSyncedClear', 'leftAConversation'].includes(action.payload.reason)
         const clearExistingMessages =
           action.type === Chat2Gen.inboxRefresh && action.payload.reason === 'inboxSyncedClear'
-        yield Saga.put(Chat2Gen.createMetasReceived({metas, clearExistingMessages, clearExistingMetas}))
+        yield Saga.put(Chat2Gen.createMetasReceived({clearExistingMessages, clearExistingMetas, metas}))
         return EngineRpc.rpcResult()
       },
     },
@@ -109,6 +112,8 @@ const queueMetaToRequest = (action: Chat2Gen.MetaNeedsUpdatingPayload, state: Ty
   if (old !== metaQueue) {
     // only unboxMore if something changed
     return Saga.put(Chat2Gen.createMetaHandleQueue())
+  } else {
+    logger.info('skipping meta queue run, queue unchanged')
   }
 }
 
@@ -150,8 +155,10 @@ const rpcMetaRequestConversationIDKeys = (
       keys = [action.payload.conversationIDKey].filter(Boolean)
       break
     default:
-      // eslint-disable-next-line no-unused-expressions
-      ;(action: empty) // errors if we don't handle any new actions
+      /*::
+      declare var ifFlowErrorsHereItsCauseYouDidntHandleAllTypesAbove: (a: empty) => any
+      ifFlowErrorsHereItsCauseYouDidntHandleAllTypesAbove(action);
+      */
       throw new Error('Invalid action passed to unboxRows')
   }
   return Constants.getConversationIDKeyMetasToLoad(keys, state.chat2.metaMap)
@@ -199,13 +206,23 @@ const unboxRows = (
   }
   const onFailed = function*({convID, error}: RPCChatTypes.ChatUiChatInboxFailedRpcParam) {
     const state: TypedState = yield Saga.select()
-    yield Saga.put(
-      Chat2Gen.createMetaReceivedError({
-        conversationIDKey: Types.conversationIDToKey(convID),
-        error,
-        username: state.config.username || '',
-      })
-    )
+    const conversationIDKey = Types.conversationIDToKey(convID)
+    switch (error.typ) {
+      case RPCChatTypes.localConversationErrorType.transient:
+        logger.info(
+          `onFailed: ignoring transient error for convID: ${conversationIDKey} error: ${error.message}`
+        )
+        break
+      default:
+        logger.info(`onFailed: displaying error for convID: ${conversationIDKey} error: ${error.message}`)
+        yield Saga.put(
+          Chat2Gen.createMetaReceivedError({
+            conversationIDKey: conversationIDKey,
+            error,
+            username: state.config.username || '',
+          })
+        )
+    }
     return EngineRpc.rpcResult()
   }
   const loadInboxRpc = new EngineRpc.EngineRpcCall(
@@ -222,7 +239,7 @@ const unboxRows = (
         ...inboxQuery,
         convIDs: conversationIDKeys.map(Types.keyToConversationID),
       },
-      skipUnverified: false,
+      skipUnverified: true,
     },
     false,
     loading => Chat2Gen.createSetLoading({key: `unboxing:${conversationIDKeys[0]}`, loading})
@@ -443,7 +460,10 @@ const onChatThreadStale = updates => {
   if (conversationIDKeys.length > 0) {
     return [
       Chat2Gen.createMarkConversationsStale({conversationIDKeys}),
-      Chat2Gen.createMetaNeedsUpdating({conversationIDKeys, reason: 'onChatThreadStale'}),
+      Chat2Gen.createMetaRequestTrusted({
+        conversationIDKeys,
+        force: true,
+      }),
     ]
   }
 }
@@ -472,6 +492,7 @@ const setupChatHandlers = () => {
     'chat.1.NotifyChat.NewChatActivity',
     (payload: {activity: RPCChatTypes.ChatActivity}, ignore1, ignore2, getState) => {
       const activity: RPCChatTypes.ChatActivity = payload.activity
+      logger.info(`Got new chat activity of type: ${activity.activityType}`)
       switch (activity.activityType) {
         case RPCChatTypes.notifyChatChatActivityType.incomingMessage:
           return activity.incomingMessage ? onIncomingMessage(activity.incomingMessage, getState()) : null
@@ -620,8 +641,8 @@ const loadMoreMessages = (
     | Chat2Gen.MetasReceivedPayload,
   state: TypedState
 ) => {
-  const numMessagesOnInitialLoad = isMobile ? 20 : 50
-  const numMessagesOnScrollback = isMobile ? 50 : 100
+  const numMessagesOnInitialLoad = isMobile ? 20 : 500
+  const numMessagesOnScrollback = isMobile ? 100 : 500
 
   // Get the conversationIDKey
   let key = null
@@ -786,6 +807,7 @@ const loadMoreMessages = (
         markAsRead: false,
         messageTypes: loadThreadMessageTypes,
       },
+      pgmode: RPCChatTypes.localGetThreadNonblockPgMode.server,
       reason:
         reason === 'push'
           ? RPCChatTypes.localGetThreadNonblockReason.push
@@ -999,9 +1021,7 @@ const messageEdit = (action: Chat2Gen.MessageEditPayload, state: TypedState) => 
 // First we make the conversation, then on success we dispatch the piggybacking action
 const sendToPendingConversation = (action: Chat2Gen.SendToPendingConversationPayload, state: TypedState) => {
   const tlfName = action.payload.users.join(',')
-  const membersType = flags.impTeamChatEnabled
-    ? RPCChatTypes.commonConversationMembersType.impteamnative
-    : RPCChatTypes.commonConversationMembersType.kbfs
+  const membersType = RPCChatTypes.commonConversationMembersType.impteamnative
 
   return Saga.sequentially([
     // Disable sending more into a pending conversation
@@ -1448,7 +1468,14 @@ function* downloadAttachment(fileName: string, conversationIDKey: any, message: 
 
 // Download an attachment to your device
 function* attachmentDownload(action: Chat2Gen.AttachmentDownloadPayload) {
-  const {conversationIDKey, ordinal} = action.payload
+  const {conversationIDKey, forShare, ordinal} = action.payload
+  if (forShare) {
+    // We are sharing an attachment on mobile,
+    // the reducer handles setting the appropriate
+    // flags in this case
+    // TODO DESKTOP-6562 refactor this logic
+    return
+  }
   const state: TypedState = yield Saga.select()
   let message = Constants.getMessageMap(state, conversationIDKey).get(ordinal)
 
@@ -1779,10 +1806,10 @@ function* messageAttachmentNativeSave(action: Chat2Gen.MessageAttachmentNativeSa
   }
   try {
     logger.info('Trying to save chat attachment to camera roll')
-    yield Saga.call(saveAttachmentDialog, message.fileURL)
+    yield Saga.call(saveAttachmentToCameraRoll, message.fileURL, message.fileType)
   } catch (err) {
-    logger.info('Failed to save attachment: ' + err)
-    throw new Error('Save attachment failed. Enable photo access in privacy settings.')
+    logger.error('Failed to save attachment: ' + err)
+    throw new Error('Failed to save attachment: ' + err)
   }
 }
 

@@ -21,7 +21,18 @@
         "CHAT_2",
         "SALTPACK_3",
         "GIT_METADATA_4",
-        "SEITAN_INVITE_TOKEN_5"
+        "SEITAN_INVITE_TOKEN_5",
+        "STELLAR_RELAY_6"
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "TeamStatus",
+      "symbols": [
+        "NONE_0",
+        "LIVE_1",
+        "DELETED_2",
+        "ABANDONED_3"
       ]
     },
     {
@@ -703,6 +714,10 @@
             "keys": "PerTeamKeyGeneration"
           },
           "name": "perTeamKeys"
+        },
+        {
+          "type": "UnixTime",
+          "name": "perTeamKeyCTime"
         },
         {
           "type": {

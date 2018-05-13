@@ -14,7 +14,8 @@ protocol NotifyChat {
     MEMBERS_UPDATE_6,
     SET_APP_NOTIFICATION_SETTINGS_7,
     TEAMTYPE_8,
-    EXPUNGE_9
+    EXPUNGE_9,
+    EPHEMERAL_PURGE_10
   }
 
   record IncomingMessage {
@@ -32,7 +33,8 @@ protocol NotifyChat {
   }
 
   record NewConversationInfo {
-    InboxUIItem conv;
+    ConversationID convID;
+    union { null, InboxUIItem } conv;
   }
 
   record SetStatusInfo {
@@ -68,6 +70,11 @@ protocol NotifyChat {
     Expunge expunge;
   }
 
+  record EphemeralPurgeNotifInfo {
+    ConversationID convID;
+    array<UIMessage> msgs;
+  }
+
   variant ChatActivity switch (ChatActivityType activityType) {
     case INCOMING_MESSAGE: IncomingMessage;
     case READ_MESSAGE: ReadMessageInfo;
@@ -78,6 +85,7 @@ protocol NotifyChat {
     case SET_APP_NOTIFICATION_SETTINGS: SetAppNotificationSettingsInfo;
     case TEAMTYPE: TeamTypeInfo;
     case EXPUNGE: ExpungeInfo;
+    case EPHEMERAL_PURGE: EphemeralPurgeNotifInfo;
   }
 
   record TyperInfo {
@@ -144,7 +152,7 @@ protocol NotifyChat {
 
   @notify("")
   @lint("ignore")
-  void ChatJoinedConversation(keybase1.UID uid, InboxUIItem conv);
+  void ChatJoinedConversation(keybase1.UID uid, ConversationID convID, union { null, InboxUIItem } conv);
 
   @notify("")
   @lint("ignore")

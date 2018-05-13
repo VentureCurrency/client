@@ -69,9 +69,11 @@ func (s *Server) ExportSecretKeyLocal(ctx context.Context, accountID stellar1.Ac
 		return res, err
 	}
 
+	mctx := libkb.NewMetaContext(ctx, s.G())
+
 	// Prompt for passphrase
 	username := s.G().GetEnv().GetUsername().String()
-	arg := libkb.DefaultPassphrasePromptArg(s.G(), username)
+	arg := libkb.DefaultPassphrasePromptArg(mctx, username)
 	arg.Prompt = arg.Prompt + " to export Stellar secret keys"
 	secretUI := s.uiSource.SecretUI(s.G(), 0)
 	ppRes, err := secretUI.GetPassphrase(arg, nil)
@@ -79,7 +81,7 @@ func (s *Server) ExportSecretKeyLocal(ctx context.Context, accountID stellar1.Ac
 		return res, err
 	}
 	pwdOk := false
-	_, err = s.G().LoginState().VerifyPlaintextPassphrase(ppRes.Passphrase, func(lctx libkb.LoginContext) error {
+	_, err = s.G().LoginState().VerifyPlaintextPassphrase(mctx, ppRes.Passphrase, func(lctx libkb.LoginContext) error {
 		pwdOk = true
 		return nil
 	})
@@ -171,6 +173,8 @@ func (s *Server) SetDisplayCurrency(ctx context.Context, arg stellar1.SetDisplay
 
 type exchangeRateMap map[string]stellar1.OutsideExchangeRate
 
+const defaultOutsideCurrency = "USD"
+
 // getLocalCurrencyAndExchangeRate gets display currency setting
 // for accountID and fetches exchange rate is set.
 //
@@ -181,7 +185,9 @@ func getLocalCurrencyAndExchangeRate(ctx context.Context, g *libkb.GlobalContext
 		return err
 	}
 	if displayCurrency == "" {
-		return nil
+		displayCurrency = defaultOutsideCurrency
+		g.Log.CDebugf(ctx, "Setting default display currency %s for account %s",
+			displayCurrency, account.AccountID)
 	}
 	rate, ok := exchangeRates[displayCurrency]
 	if !ok {
@@ -219,7 +225,7 @@ func (s *Server) WalletGetLocalAccounts(ctx context.Context) (ret []stellar1.Loc
 			Name:      account.Name,
 		}
 
-		balances, err := remote.Balances(ctx, s.G(), accID)
+		balances, err := s.remoter.Balances(ctx, accID)
 		if err != nil {
 			accountError = err
 			s.G().Log.Warning("Could not load balance for %q", accID)
@@ -253,4 +259,40 @@ func (s *Server) ExchangeRateLocal(ctx context.Context, currency stellar1.Outsid
 	ctx = s.logTag(ctx)
 	defer s.G().CTraceTimed(ctx, fmt.Sprintf("ExchangeRateLocal(%s)", string(currency)), func() error { return err })()
 	return remote.ExchangeRate(ctx, s.G(), string(currency))
+}
+
+func (s *Server) GetAvailableLocalCurrencies(ctx context.Context) (ret map[stellar1.OutsideCurrencyCode]stellar1.OutsideCurrencyDefinition, err error) {
+	ctx = s.logTag(ctx)
+	defer s.G().CTraceTimed(ctx, "GetAvailableCurrencies", func() error { return err })()
+
+	conf, err := s.G().GetStellar().GetServerDefinitions(ctx)
+	if err != nil {
+		return ret, err
+	}
+
+	return conf.Currencies, nil
+}
+
+func (s *Server) FormatLocalCurrencyString(ctx context.Context, arg stellar1.FormatLocalCurrencyStringArg) (res string, err error) {
+	ctx = s.logTag(ctx)
+	defer s.G().CTraceTimed(ctx, "FormatCurrencyString", func() error { return err })()
+
+	res = arg.Amount
+	conf, err := s.G().GetStellar().GetServerDefinitions(ctx)
+	if err != nil {
+		return res, err
+	}
+
+	currency, ok := conf.Currencies[arg.Code]
+	if !ok {
+		return res, fmt.Errorf("Could not find currency %q", arg.Code)
+	}
+
+	if currency.Symbol.Postfix {
+		res = fmt.Sprintf("%s %s", arg.Amount, currency.Symbol.Symbol)
+	} else {
+		res = fmt.Sprintf("%s%s", currency.Symbol.Symbol, arg.Amount)
+	}
+
+	return res, nil
 }

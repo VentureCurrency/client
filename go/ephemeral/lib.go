@@ -12,6 +12,21 @@ import (
 	"github.com/keybase/client/go/protocol/keybase1"
 )
 
+// While  under development, this whitelist will allow ephemeral code to work
+// (useful for enabling on mobile builds)
+var adminWhitelist = map[keybase1.UID]bool{
+	"d1b3a5fa977ce53da2c2142a4511bc00": true, // joshblum
+	"41b1f75fb55046d370608425a3208100": true, // oconnor663
+	"95e88f2087e480cae28f08d81554bc00": true, // mikem
+	"8c7c57995cd14780e351fc90ca7dc819": true, // ayoubd
+	"08abe80bd2da8984534b2d8f7b12c700": true, // songgao
+	"d95f137b3b4a3600bc9e39350adba819": true, // cecileb
+	"23260c2ce19420f97b58d7d95b68ca00": true, // chris
+	"eb08cb06e608ea41bd893946445d7919": true, // mlsteele
+	"69da56f622a2ac750b8e590c3658a700": true, // jzila
+	"1563ec26dc20fd162a4f783551141200": true, // patrick
+}
+
 const cacheEntryLifetimeSecs = 60 * 5 // 5 minutes
 const lruSize = 200
 
@@ -33,8 +48,13 @@ func NewEKLib(g *libkb.GlobalContext) *EKLib {
 	}
 }
 
+func (e *EKLib) NewMetaContext(ctx context.Context) libkb.MetaContext {
+	return libkb.NewMetaContext(ctx, e.G())
+}
+
 func (e *EKLib) checkLoginAndPUK(ctx context.Context) error {
-	if loggedIn, err := e.G().LoginState().LoggedInLoad(); err != nil {
+	m := e.NewMetaContext(ctx)
+	if loggedIn, _, err := libkb.BootstrapActiveDeviceWithMetaContext(m); err != nil {
 		return err
 	} else if !loggedIn {
 		return fmt.Errorf("Aborting ephemeral key generation, user is not logged in!")
@@ -44,7 +64,7 @@ func (e *EKLib) checkLoginAndPUK(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := pukring.Sync(ctx); err != nil {
+	if err := pukring.Sync(m); err != nil {
 		return err
 	}
 	if !pukring.HasAnyKeys() {
@@ -58,15 +78,17 @@ func (e *EKLib) checkLoginAndPUK(ctx context.Context) error {
 func (e *EKLib) ShouldRun(ctx context.Context) bool {
 	g := e.G()
 
-	// TODO -- when we launch, remove the feature flagging on Prod
-	willRun := g.Env.GetFeatureFlags().Admin() || g.Env.GetRunMode() == libkb.DevelRunMode || g.Env.RunningInCI()
+	uid := g.Env.GetUID()
+	_, ok := adminWhitelist[uid]
+	willRun := ok || g.Env.GetFeatureFlags().Admin() || g.Env.GetRunMode() == libkb.DevelRunMode || g.Env.RunningInCI()
 	if !willRun {
-		e.G().Log.CDebugf(ctx, "EKLib skipping run")
+		e.G().Log.CDebugf(ctx, "EKLib skipping run uid: %v", uid)
 		return false
 	}
+
 	oneshot, err := g.IsOneshot(ctx)
 	if err != nil {
-		e.G().Log.CWarningf(ctx, "EKLib#ShouldRun failed: %s", err)
+		g.Log.CDebugf(ctx, "EKLib#ShouldRun failed: %s", err)
 		return false
 	}
 	return !oneshot
@@ -186,14 +208,11 @@ func (e *EKLib) newUserEKNeeded(ctx context.Context, merkleRoot libkb.MerkleRoot
 	defer e.G().CTrace(ctx, "newUserEKNeeded", func() error { return err })()
 
 	// Let's see what the latest server statement is.
-	myUID := e.G().Env.GetUID()
-	statements, err := fetchUserEKStatements(ctx, e.G(), []keybase1.UID{myUID})
+	statement, _, wrongKID, err := fetchUserEKStatement(ctx, e.G(), e.G().Env.GetUID())
 	if err != nil {
 		return false, err
 	}
-	statement, ok := statements[myUID]
-	// No statement, so we need a userEK
-	if !ok || statement == nil {
+	if statement == nil || wrongKID {
 		return true, nil
 	}
 	// Can we access this generation? If not, let's regenerate.
@@ -201,7 +220,7 @@ func (e *EKLib) newUserEKNeeded(ctx context.Context, merkleRoot libkb.MerkleRoot
 	ek, err := s.Get(ctx, statement.CurrentUserEkMetadata.Generation)
 	if err != nil {
 		switch err.(type) {
-		case *EKUnboxErr:
+		case *EKUnboxErr, *EKMissingBoxErr:
 			e.G().Log.Debug(err.Error())
 			return true, nil
 		default:
@@ -220,7 +239,7 @@ func (e *EKLib) NewTeamEKNeeded(ctx context.Context, teamID keybase1.TeamID) (ne
 	if err != nil {
 		return false, err
 	}
-	statement, err := fetchTeamEKStatement(ctx, e.G(), teamID)
+	statement, _, _, err := fetchTeamEKStatement(ctx, e.G(), teamID)
 	if err != nil {
 		return false, err
 	}
@@ -240,7 +259,7 @@ func (e *EKLib) newTeamEKNeeded(ctx context.Context, teamID keybase1.TeamID, mer
 	ek, err := s.Get(ctx, teamID, statement.CurrentTeamEkMetadata.Generation)
 	if err != nil {
 		switch err.(type) {
-		case *EKUnboxErr:
+		case *EKUnboxErr, *EKMissingBoxErr:
 			e.G().Log.Debug(err.Error())
 			return true, nil
 		default:
@@ -288,6 +307,15 @@ func (e *EKLib) PurgeTeamEKGenCache(teamID keybase1.TeamID, generation keybase1.
 
 func (e *EKLib) GetOrCreateLatestTeamEK(ctx context.Context, teamID keybase1.TeamID) (teamEK keybase1.TeamEk, err error) {
 	defer e.G().CTrace(ctx, "GetOrCreateLatestTeamEK", func() error { return err })()
+	err = teamEKRetryWrapper(ctx, e.G(), func() error {
+		teamEK, err = e.getOrCreateLatestTeamEKInner(ctx, teamID)
+		return err
+	})
+	return teamEK, err
+}
+
+func (e *EKLib) getOrCreateLatestTeamEKInner(ctx context.Context, teamID keybase1.TeamID) (teamEK keybase1.TeamEk, err error) {
+	defer e.G().CTrace(ctx, "getOrCreateLatestTeamEKInner", func() error { return err })()
 
 	e.Lock()
 	defer e.Unlock()
@@ -318,7 +346,7 @@ func (e *EKLib) GetOrCreateLatestTeamEK(ctx context.Context, teamID keybase1.Tea
 		return teamEK, err
 	}
 
-	statement, err := fetchTeamEKStatement(ctx, e.G(), teamID)
+	statement, _, _, err := fetchTeamEKStatement(ctx, e.G(), teamID)
 	if err != nil {
 		return teamEK, err
 	}
@@ -342,6 +370,23 @@ func (e *EKLib) GetOrCreateLatestTeamEK(ctx context.Context, teamID keybase1.Tea
 	// Cache the latest generation
 	e.teamEKGenCache.Add(key, e.newCacheEntry(publishedMetadata.Generation))
 	return teamEK, nil
+}
+
+// Try to get the TeamEK for the given `generation`. If this fails and the
+// `generation` is also the current maxGeneration, create a new teamEK.
+func (e *EKLib) GetTeamEK(ctx context.Context, teamID keybase1.TeamID, generation keybase1.EkGeneration) (teamEK keybase1.TeamEk, err error) {
+	defer e.G().CTrace(ctx, "GetTeamEK", func() error { return err })()
+
+	teamEK, err = e.G().GetTeamEKBoxStorage().Get(ctx, teamID, generation)
+	if err != nil {
+		switch err.(type) {
+		case *EKUnboxErr, *EKMissingBoxErr:
+			if _, cerr := e.GetOrCreateLatestTeamEK(ctx, teamID); cerr != nil {
+				e.G().Log.CDebugf(ctx, "Unable to GetOrCreateLatestTeamEK: %v", cerr)
+			}
+		}
+	}
+	return teamEK, err
 }
 
 func (e *EKLib) NewEphemeralSeed() (seed keybase1.Bytes32, err error) {
@@ -478,7 +523,11 @@ func (e *EKLib) OnLogin() error {
 	if !e.ShouldRun(context.Background()) {
 		return nil
 	}
-	return e.KeygenIfNeeded(context.Background())
+	err := e.KeygenIfNeeded(context.Background())
+	if err != nil {
+		e.G().Log.CDebugf(context.Background(), "OnLogin error: %v", err)
+	}
+	return nil
 }
 
 func (e *EKLib) OnLogout() error {

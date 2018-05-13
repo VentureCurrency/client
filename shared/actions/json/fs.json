@@ -1,7 +1,5 @@
 {
-  "prelude": [
-    "import * as Types from '../constants/types/fs'"
-  ],
+  "prelude": ["import * as Types from '../constants/types/fs'"],
   "actions": {
     "folderListLoad": {
       "path": "Types.Path"
@@ -27,7 +25,6 @@
     },
     "download": {
       "intent": "Types.TransferIntent",
-      "mimeType?": "string",
       "path": "Types.Path",
       "localPath?": "string"
     },
@@ -81,7 +78,38 @@
     "uninstallKBFS": {},
     "fsActivity": {},
     "openSecurityPreferences": {},
+    "refreshLocalHTTPServerInfo": {},
+    "localHTTPServerInfo": {
+      "address": "string",
+      "token": "string"
+    },
+    "favoriteIgnore": {
+      "path": "Types.Path"
+    },
+    "favoriteIgnoreError": {
+      "path": "Types.Path",
+      "errorText": "string"
+    },
 
-    "setupFSHandlers": {}
+    "setupFSHandlers": {},
+
+    "share": {
+      "path": "Types.Path",
+      "routePath": "I.List<string>"
+    },
+    "save": {
+      "path": "Types.Path",
+      "routePath": "I.List<string>"
+    },
+    "fileActionPopup": {
+      "path": "Types.Path",
+      "type": "Types.PathType",
+      "targetRect": "?ClientRect",
+      "routePath": "I.List<string>"
+    },
+    "openFinderPopup": {
+      "targetRect": "?ClientRect",
+      "routePath": "I.List<string>"
+    }
   }
 }

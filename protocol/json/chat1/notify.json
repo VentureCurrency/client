@@ -21,7 +21,8 @@
         "MEMBERS_UPDATE_6",
         "SET_APP_NOTIFICATION_SETTINGS_7",
         "TEAMTYPE_8",
-        "EXPUNGE_9"
+        "EXPUNGE_9",
+        "EPHEMERAL_PURGE_10"
       ]
     },
     {
@@ -82,7 +83,14 @@
       "name": "NewConversationInfo",
       "fields": [
         {
-          "type": "InboxUIItem",
+          "type": "ConversationID",
+          "name": "convID"
+        },
+        {
+          "type": [
+            null,
+            "InboxUIItem"
+          ],
           "name": "conv"
         }
       ]
@@ -193,6 +201,23 @@
       ]
     },
     {
+      "type": "record",
+      "name": "EphemeralPurgeNotifInfo",
+      "fields": [
+        {
+          "type": "ConversationID",
+          "name": "convID"
+        },
+        {
+          "type": {
+            "type": "array",
+            "items": "UIMessage"
+          },
+          "name": "msgs"
+        }
+      ]
+    },
+    {
       "type": "variant",
       "name": "ChatActivity",
       "switch": {
@@ -262,6 +287,13 @@
             "def": false
           },
           "body": "ExpungeInfo"
+        },
+        {
+          "label": {
+            "name": "EPHEMERAL_PURGE",
+            "def": false
+          },
+          "body": "EphemeralPurgeNotifInfo"
         }
       ]
     },
@@ -497,8 +529,15 @@
           "type": "keybase1.UID"
         },
         {
+          "name": "convID",
+          "type": "ConversationID"
+        },
+        {
           "name": "conv",
-          "type": "InboxUIItem"
+          "type": [
+            null,
+            "InboxUIItem"
+          ]
         }
       ],
       "response": null,

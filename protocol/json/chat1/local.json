@@ -1110,7 +1110,8 @@
         "MISC_0",
         "BADVERSION_CRITICAL_1",
         "BADVERSION_2",
-        "IDENTIFY_3"
+        "IDENTIFY_3",
+        "EPHEMERAL_4"
       ]
     },
     {
@@ -1136,6 +1137,24 @@
         {
           "type": "gregor1.Time",
           "name": "ctime"
+        },
+        {
+          "type": "boolean",
+          "name": "isEphemeral",
+          "mpackkey": "ie",
+          "jsonkey": "ie"
+        },
+        {
+          "type": "boolean",
+          "name": "isEphemeralExpired",
+          "mpackkey": "iex",
+          "jsonkey": "iex"
+        },
+        {
+          "type": "gregor1.Time",
+          "name": "etime",
+          "mpackkey": "e",
+          "jsonkey": "e"
         }
       ]
     },
@@ -1146,6 +1165,10 @@
         {
           "type": "MessageID",
           "name": "messageID"
+        },
+        {
+          "type": "boolean",
+          "name": "hidden"
         }
       ]
     },
@@ -1607,6 +1630,14 @@
       "symbols": [
         "GENERAL_0",
         "PUSH_1"
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "GetThreadNonblockPgMode",
+      "symbols": [
+        "DEFAULT_0",
+        "SERVER_1"
       ]
     },
     {
@@ -2355,6 +2386,10 @@
         {
           "name": "reason",
           "type": "GetThreadNonblockReason"
+        },
+        {
+          "name": "pgmode",
+          "type": "GetThreadNonblockPgMode"
         },
         {
           "name": "query",

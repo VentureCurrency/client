@@ -141,7 +141,11 @@ class UserInput extends Component<Props, State> {
     this.props.onChangeText(text.replace(ZERO_WIDTH_SPACE, ''))
   }
 
-  _onSelectionChange = ({nativeEvent: {selection: {start, end}}}) => {
+  _onSelectionChange = ({
+    nativeEvent: {
+      selection: {start, end},
+    },
+  }) => {
     this.setState({selectionStart: start, selectionEnd: end})
   }
 
@@ -215,10 +219,10 @@ class UserInput extends Component<Props, State> {
                   onClick={onClickAddButton}
                   type="iconfont-add"
                   style={{
-                    fontSize: 16,
                     height: 16,
-                    color: globalColors.blue,
                   }}
+                  fontSize={16}
+                  color={globalColors.blue}
                 />
               )}
           </Box>

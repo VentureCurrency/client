@@ -242,8 +242,10 @@ func TestConvLoaderPageBack(t *testing.T) {
 	conv := ib.Inbox.Full().Conversations[0]
 
 	u := world.GetUsers()[0]
+	skp, err := sender.(*BlockingSender).getSigningKeyPair(ctx)
+	require.NoError(t, err)
 	for i := 0; i < 2; i++ {
-		_, _, _, err = sender.Send(ctx, res.ConvID, chat1.MessagePlaintext{
+		pt := chat1.MessagePlaintext{
 			ClientHeader: chat1.MessageClientHeader{
 				Conv:        conv.Metadata.IdTriple,
 				Sender:      u.User.GetUID().ToBytes(),
@@ -251,13 +253,26 @@ func TestConvLoaderPageBack(t *testing.T) {
 				MessageType: chat1.MessageType_TEXT,
 			},
 			MessageBody: chat1.NewMessageBodyWithText(chat1.MessageText{Body: "foo"}),
-		}, 0, nil)
+		}
+		boxed, err := NewBoxer(tc.Context()).BoxMessage(ctx, pt, conv.GetMembersType(), skp)
 		require.NoError(t, err)
+		require.NotNil(t, boxed)
+		_, err = ri().PostRemote(ctx, chat1.PostRemoteArg{
+			ConversationID: conv.GetConvID(),
+			MessageBoxed:   *boxed,
+		})
+		require.NoError(t, err)
+	}
+	// Send kicks off one of these when reading the conversation
+	select {
+	case <-listener.bgConvLoads:
+		require.Fail(t, "no loads here")
+	default:
 	}
 
 	require.NoError(t, tc.Context().ConvLoader.Queue(context.TODO(),
-		types.NewConvLoaderJob(res.ConvID, &chat1.Pagination{Num: 1}, types.ConvLoaderPriorityHigh, nil)))
-
+		types.NewConvLoaderJob(res.ConvID, &chat1.Pagination{Num: 1}, types.ConvLoaderPriorityHigh,
+			newConvLoaderPagebackHook(tc.Context(), 0, 1))))
 	for i := 0; i < 2; i++ {
 		select {
 		case <-listener.bgConvLoads:
@@ -328,7 +343,7 @@ func TestBackgroundPurge(t *testing.T) {
 	uid := gregor1.UID(u.GetUID().ToBytes())
 	trip := newConvTriple(ctx, t, tc, u.Username)
 	clock := world.Fc
-	chatStorage := storage.New(g)
+	chatStorage := storage.New(g, tc.ChatG.ConvSource)
 	chatStorage.SetClock(clock)
 
 	// setup a ticker since we don't run the service's fastChatChecks ticker here.
@@ -379,6 +394,20 @@ func TestBackgroundPurge(t *testing.T) {
 		require.Equal(t, expectedPurgeInfo, purgeInfo)
 	}
 
+	assertEphemeralPurgeNotifInfo := func(convID chat1.ConversationID, msgIDs []chat1.MessageID) {
+		info := listener.consumeEphemeralPurge(t)
+		require.Equal(t, info.ConvID, convID)
+		if msgIDs == nil {
+			require.Nil(t, info.Msgs)
+		} else {
+			purgedIDs := []chat1.MessageID{}
+			for _, purgedMsg := range info.Msgs {
+				purgedIDs = append(purgedIDs, purgedMsg.GetMessageID())
+			}
+			require.Equal(t, msgIDs, purgedIDs)
+		}
+	}
+
 	// Load our conv with the initial tlf msg
 	require.NoError(t, tc.Context().ConvLoader.Queue(context.TODO(),
 		types.NewConvLoaderJob(res.ConvID, &chat1.Pagination{Num: 3}, types.ConvLoaderPriorityHigh, nil)))
@@ -422,6 +451,7 @@ func TestBackgroundPurge(t *testing.T) {
 		NextPurgeTime:   msgUnboxed2.Valid().Etime(),
 		IsActive:        true,
 	})
+	assertEphemeralPurgeNotifInfo(res.ConvID, []chat1.MessageID{msgUnboxed1.GetMessageID()})
 
 	t.Logf("assert listener 3")
 	assertListener(res.ConvID)
@@ -430,4 +460,5 @@ func TestBackgroundPurge(t *testing.T) {
 		NextPurgeTime:   0,
 		IsActive:        false,
 	})
+	assertEphemeralPurgeNotifInfo(res.ConvID, []chat1.MessageID{msgUnboxed2.GetMessageID()})
 }

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keybase/client/go/chat/storage"
 	"github.com/keybase/client/go/chat/types"
 	"github.com/keybase/client/go/kbtest"
 	"github.com/keybase/client/go/libkb"
@@ -457,6 +456,10 @@ func (f failingUpak) LoadV2WithKID(ctx context.Context, uid keybase1.UID, kid ke
 	require.Fail(f.t, "LoadV2WithKID call")
 	return nil, nil
 }
+func (f failingUpak) CheckDeviceForUIDAndUsername(ctx context.Context, uid keybase1.UID, did keybase1.DeviceID, n libkb.NormalizedUsername) error {
+	require.Fail(f.t, "CheckDeviceForUIDAndUsername call")
+	return nil
+}
 
 func TestGetThreadCaching(t *testing.T) {
 	ctx, world, ri, _, sender, _ := setupTest(t, 1)
@@ -611,7 +614,7 @@ func TestGetThreadHoleResolution(t *testing.T) {
 	}
 	doSync(t, syncer, ri, uid)
 
-	localThread, err := tc.Context().ConvSource.PullLocalOnly(ctx, convID, uid, nil, nil)
+	localThread, err := tc.Context().ConvSource.PullLocalOnly(ctx, convID, uid, nil, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(localThread.Messages))
 
@@ -837,7 +840,7 @@ func TestConversationLockingDeadlock(t *testing.T) {
 	require.True(t, hcs.lockTab.Release(ctx2, uid, conv3.GetConvID()))
 }
 
-func TestExpungeFromDelete(t *testing.T) {
+func TestClearFromDelete(t *testing.T) {
 	ctx, world, ri2, _, sender, listener := setupTest(t, 1)
 	defer world.Cleanup()
 
@@ -882,18 +885,18 @@ func TestExpungeFromDelete(t *testing.T) {
 	require.NoError(t, hcs.storage.MaybeNuke(context.TODO(), true, nil, conv.GetConvID(), uid))
 	_, err = hcs.GetMessages(ctx, conv, uid, []chat1.MessageID{3, 2})
 	require.NoError(t, err)
-	tv, err := hcs.PullLocalOnly(ctx, conv.GetConvID(), uid, nil, nil)
-	require.Error(t, err)
-	require.IsType(t, storage.MissError{}, err)
+	tv, err := hcs.PullLocalOnly(ctx, conv.GetConvID(), uid, nil, nil, 0)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(tv.Messages))
 
 	hcs.numExpungeReload = 1
-	hcs.ExpungeFromDelete(ctx, uid, conv.GetConvID(), 4)
+	hcs.ClearFromDelete(ctx, uid, conv.GetConvID(), 4)
 	select {
 	case <-listener.bgConvLoads:
 	case <-time.After(20 * time.Second):
 		require.Fail(t, "no conv loader")
 	}
-	tv, err = hcs.PullLocalOnly(ctx, conv.GetConvID(), uid, nil, nil)
+	tv, err = hcs.PullLocalOnly(ctx, conv.GetConvID(), uid, nil, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(tv.Messages))
 	require.Equal(t, chat1.MessageID(4), tv.Messages[0].GetMessageID())

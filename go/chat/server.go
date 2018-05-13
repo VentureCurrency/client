@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,10 +17,8 @@ import (
 
 	"github.com/keybase/clockwork"
 
-	"github.com/keybase/client/go/logger"
 	"github.com/keybase/client/go/teams"
 
-	"encoding/base64"
 	"encoding/hex"
 
 	"github.com/keybase/client/go/chat/attachments"
@@ -32,7 +31,6 @@ import (
 	"github.com/keybase/client/go/protocol/chat1"
 	"github.com/keybase/client/go/protocol/gregor1"
 	"github.com/keybase/client/go/protocol/keybase1"
-	"github.com/keybase/go-codec/codec"
 	"github.com/keybase/go-framed-msgpack-rpc/rpc"
 	"golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
@@ -52,12 +50,13 @@ type Server struct {
 	globals.Contextified
 	utils.DebugLabeler
 
-	serverConn    ServerConnection
-	uiSource      UISource
-	boxer         *Boxer
-	store         *attachments.Store
-	identNotifier types.IdentifyNotifier
-	clock         clockwork.Clock
+	serverConn     ServerConnection
+	uiSource       UISource
+	boxer          *Boxer
+	store          *attachments.Store
+	identNotifier  types.IdentifyNotifier
+	clock          clockwork.Clock
+	convPageStatus map[string]chat1.Pagination
 
 	// Only for testing
 	rc                chat1.RemoteInterface
@@ -71,14 +70,15 @@ var _ chat1.LocalInterface = (*Server)(nil)
 func NewServer(g *globals.Context, store *attachments.Store, serverConn ServerConnection,
 	uiSource UISource) *Server {
 	return &Server{
-		Contextified:  globals.NewContextified(g),
-		DebugLabeler:  utils.NewDebugLabeler(g.GetLog(), "Server", false),
-		serverConn:    serverConn,
-		uiSource:      uiSource,
-		store:         store,
-		boxer:         NewBoxer(g),
-		identNotifier: NewCachingIdentifyNotifier(g),
-		clock:         clockwork.NewRealClock(),
+		Contextified:   globals.NewContextified(g),
+		DebugLabeler:   utils.NewDebugLabeler(g.GetLog(), "Server", false),
+		serverConn:     serverConn,
+		uiSource:       uiSource,
+		store:          store,
+		boxer:          NewBoxer(g),
+		identNotifier:  NewCachingIdentifyNotifier(g),
+		clock:          clockwork.NewRealClock(),
+		convPageStatus: make(map[string]chat1.Pagination),
 	}
 }
 
@@ -308,7 +308,7 @@ func (h *Server) MarkAsReadLocal(ctx context.Context, arg chat1.MarkAsReadLocalA
 	ctx = Context(ctx, h.G(), keybase1.TLFIdentifyBehavior_CHAT_GUI, &identBreaks,
 		h.identNotifier)
 	defer h.Trace(ctx, func() error { return err },
-		fmt.Sprintf("MarkAsReadLocal(%s)", arg.ConversationID))()
+		fmt.Sprintf("MarkAsReadLocal(%s, %v)", arg.ConversationID, arg.MsgID))()
 	defer func() { err = h.handleOfflineError(ctx, err, &res) }()
 	if err = h.assertLoggedIn(ctx); err != nil {
 		return chat1.MarkAsReadLocalRes{}, err
@@ -325,11 +325,10 @@ func (h *Server) MarkAsReadLocal(ctx context.Context, arg chat1.MarkAsReadLocalA
 	}
 
 	// Check local copy to see if we have this convo, and have fully read it. If so, we skip the remote call
-	_, readRes, _, err := storage.NewInbox(h.G(), uid).Read(ctx, &chat1.GetInboxQuery{
-		ConvID: &arg.ConversationID,
-	}, nil)
-	if err == nil && len(readRes) > 0 && readRes[0].GetConvID().Eq(arg.ConversationID) &&
-		readRes[0].Conv.ReaderInfo.ReadMsgid == readRes[0].Conv.ReaderInfo.MaxMsgid {
+
+	readRes, err := storage.NewInbox(h.G(), uid).GetConversation(ctx, arg.ConversationID)
+	if err == nil && readRes.GetConvID().Eq(arg.ConversationID) &&
+		readRes.Conv.ReaderInfo.ReadMsgid == readRes.Conv.ReaderInfo.MaxMsgid {
 		h.Debug(ctx, "MarkAsReadLocal: conversation fully read: %s, not sending remote call",
 			arg.ConversationID)
 		return chat1.MarkAsReadLocalRes{
@@ -396,7 +395,7 @@ func (h *Server) GetCachedThread(ctx context.Context, arg chat1.GetCachedThreadA
 	// Get messages from local disk only
 	uid := h.G().Env.GetUID()
 	thread, err := h.G().ConvSource.PullLocalOnly(ctx, arg.ConversationID,
-		gregor1.UID(uid.ToBytes()), arg.Query, arg.Pagination)
+		gregor1.UID(uid.ToBytes()), arg.Query, arg.Pagination, 0)
 	if err != nil {
 		return chat1.GetThreadLocalRes{}, err
 	}
@@ -441,18 +440,60 @@ func (h *Server) GetThreadLocal(ctx context.Context, arg chat1.GetThreadLocalArg
 
 func (h *Server) mergeLocalRemoteThread(ctx context.Context, remoteThread, localThread *chat1.ThreadView,
 	mode chat1.GetThreadNonblockCbMode) (res chat1.ThreadView, err error) {
+	defer func() {
+		if err != nil || localThread == nil {
+			return
+		}
+		rm := make(map[chat1.MessageID]bool)
+		for _, m := range res.Messages {
+			rm[m.GetMessageID()] = true
+		}
+		// Check for any stray placeholders in the local thread we sent, and set them to some
+		// undisplayable type
+		for _, m := range localThread.Messages {
+			state, err := m.State()
+			if err != nil {
+				continue
+			}
+			if state == chat1.MessageUnboxedState_PLACEHOLDER && !rm[m.GetMessageID()] {
+				h.Debug(ctx, "mergeLocalRemoteThread: subbing in dead placeholder: msgID: %d",
+					m.GetMessageID())
+				res.Messages = append(res.Messages, chat1.NewMessageUnboxedWithPlaceholder(
+					chat1.MessageUnboxedPlaceholder{
+						MessageID: m.GetMessageID(),
+						Hidden:    true,
+					},
+				))
+			}
+		}
+		sort.Sort(utils.ByMsgUnboxedMsgID(res.Messages))
+	}()
+
+	shouldAppend := func(oldMsg chat1.MessageUnboxed) bool {
+		state, err := oldMsg.State()
+		if err != nil {
+			return true
+		}
+		switch state {
+		case chat1.MessageUnboxedState_VALID:
+			return false
+		default:
+			return true
+		}
+	}
 	switch mode {
 	case chat1.GetThreadNonblockCbMode_FULL:
 		return *remoteThread, nil
 	case chat1.GetThreadNonblockCbMode_INCREMENTAL:
 		if localThread != nil {
-			lm := make(map[chat1.MessageID]bool)
+			lm := make(map[chat1.MessageID]chat1.MessageUnboxed)
 			for _, m := range localThread.Messages {
-				lm[m.GetMessageID()] = true
+				lm[m.GetMessageID()] = m
 			}
 			res.Pagination = remoteThread.Pagination
 			for _, m := range remoteThread.Messages {
-				if !lm[m.GetMessageID()] {
+				oldMsg, ok := lm[m.GetMessageID()]
+				if !ok || shouldAppend(oldMsg) {
 					res.Messages = append(res.Messages, m)
 				}
 			}
@@ -463,6 +504,63 @@ func (h *Server) mergeLocalRemoteThread(ctx context.Context, remoteThread, local
 		return *remoteThread, nil
 	}
 	return res, errors.New("unknown get thread cb mode")
+}
+
+func (h *Server) applyPagerModeIncoming(ctx context.Context, convID chat1.ConversationID,
+	pagination *chat1.Pagination, pgmode chat1.GetThreadNonblockPgMode) (res *chat1.Pagination) {
+	defer func() {
+		h.Debug(ctx, "applyPagerModeIncoming: mode: %v convID: %s xform: %s -> %s", pgmode, convID,
+			pagination, res)
+	}()
+	switch pgmode {
+	case chat1.GetThreadNonblockPgMode_DEFAULT:
+		return pagination
+	case chat1.GetThreadNonblockPgMode_SERVER:
+		if pagination == nil {
+			return nil
+		}
+		if len(pagination.Next) > 0 {
+			return &chat1.Pagination{
+				Num:  pagination.Num,
+				Next: h.convPageStatus[convID.String()].Next,
+			}
+		} else if len(pagination.Previous) > 0 {
+			return &chat1.Pagination{
+				Num:      pagination.Num,
+				Previous: h.convPageStatus[convID.String()].Previous,
+			}
+		} else {
+			return pagination
+		}
+	}
+	return pagination
+}
+
+func (h *Server) applyPagerModeOutgoing(ctx context.Context, convID chat1.ConversationID,
+	pagination *chat1.Pagination, incoming *chat1.Pagination, pgmode chat1.GetThreadNonblockPgMode) {
+	switch pgmode {
+	case chat1.GetThreadNonblockPgMode_DEFAULT:
+	case chat1.GetThreadNonblockPgMode_SERVER:
+		if pagination == nil {
+			return
+		}
+		if incoming == nil || (len(incoming.Next) == 0 && len(incoming.Previous) == 0) {
+			h.Debug(ctx, "applyPagerModeOutgoing: resetting pagination: convID: %s p: %s", convID, pagination)
+			h.convPageStatus[convID.String()] = *pagination
+		} else {
+			oldStored := h.convPageStatus[convID.String()]
+			if len(incoming.Next) > 0 {
+				oldStored.Next = pagination.Next
+				h.Debug(ctx, "applyPagerModeOutgoing: setting next pagination: convID: %s p: %s", convID,
+					pagination)
+			} else if len(incoming.Previous) > 0 {
+				h.Debug(ctx, "applyPagerModeOutgoing: setting prev pagination: convID: %s p: %s", convID,
+					pagination)
+				oldStored.Previous = pagination.Previous
+			}
+			h.convPageStatus[convID.String()] = oldStored
+		}
+	}
 }
 
 func (h *Server) GetThreadNonblock(ctx context.Context, arg chat1.GetThreadNonblockArg) (res chat1.NonblockFetchRes, fullErr error) {
@@ -525,6 +623,9 @@ func (h *Server) GetThreadNonblock(ctx context.Context, arg chat1.GetThreadNonbl
 		pagination = utils.XlateMessageIDControlToPagination(arg.Query.MessageIDControl)
 	}
 
+	// Apply any pager mode transformations
+	pagination = h.applyPagerModeIncoming(ctx, arg.ConversationID, pagination, arg.Pgmode)
+
 	// Grab local copy first
 	chatUI := h.getChatUI(arg.SessionID)
 
@@ -548,7 +649,7 @@ func (h *Server) GetThreadNonblock(ctx context.Context, arg chat1.GetThreadNonbl
 				h.clock.Sleep(*h.cachedThreadDelay)
 			}
 			localThread, err = h.G().ConvSource.PullLocalOnly(bctx, arg.ConversationID,
-				uid, arg.Query, pagination)
+				uid, arg.Query, pagination, 10)
 			ch <- err
 		}()
 		select {
@@ -576,7 +677,12 @@ func (h *Server) GetThreadNonblock(ctx context.Context, arg chat1.GetThreadNonbl
 		}
 		var pthread *string
 		if resThread != nil {
-			h.Debug(ctx, "GetThreadNonblock: sending cached response: %d messages", len(resThread.Messages))
+			pstr := "<nil>"
+			if resThread.Pagination != nil {
+				pstr = resThread.Pagination.String()
+			}
+			h.Debug(ctx, "GetThreadNonblock: sending cached response: messages: %d pager: %s",
+				len(resThread.Messages), pstr)
 			var jsonPt []byte
 			var err error
 
@@ -588,6 +694,7 @@ func (h *Server) GetThreadNonblock(ctx context.Context, arg chat1.GetThreadNonbl
 			}
 			sJSONPt := string(jsonPt)
 			pthread = &sJSONPt
+			h.applyPagerModeOutgoing(bctx, arg.ConversationID, resThread.Pagination, pagination, arg.Pgmode)
 		} else {
 			h.Debug(ctx, "GetThreadNonblock: sending nil cached response")
 		}
@@ -623,13 +730,19 @@ func (h *Server) GetThreadNonblock(ctx context.Context, arg chat1.GetThreadNonbl
 			h.mergeLocalRemoteThread(ctx, &remoteThread, localSentThread, arg.CbMode); fullErr != nil {
 			return
 		}
-		h.Debug(ctx, "GetThreadNonblock: sending full response: %d messages", len(rthread.Messages))
+		pstr := "<nil>"
+		if rthread.Pagination != nil {
+			pstr = rthread.Pagination.String()
+		}
+		h.Debug(ctx, "GetThreadNonblock: sending full response: messages: %d pager: %s",
+			len(rthread.Messages), pstr)
 		uires := utils.PresentThreadView(bctx, h.G(), uid, rthread, arg.ConversationID)
 		var jsonUIRes []byte
 		if jsonUIRes, fullErr = json.Marshal(uires); fullErr != nil {
 			h.Debug(ctx, "GetThreadNonblock: failed to JSON full result: %s", fullErr)
 			return
 		}
+		h.applyPagerModeOutgoing(bctx, arg.ConversationID, rthread.Pagination, pagination, arg.Pgmode)
 		chatUI.ChatThreadFull(bctx, chat1.ChatThreadFullArg{
 			SessionID: arg.SessionID,
 			Thread:    string(jsonUIRes),
@@ -1170,7 +1283,7 @@ func (h *Server) PostLocalNonblock(ctx context.Context, arg chat1.PostLocalNonbl
 	if arg.ClientPrev == 0 {
 		h.Debug(ctx, "PostLocalNonblock: ClientPrev not specified using local storage")
 		thread, err := h.G().ConvSource.PullLocalOnly(ctx, arg.ConversationID, uid.ToBytes(), nil,
-			&chat1.Pagination{Num: 1})
+			&chat1.Pagination{Num: 1}, 0)
 		if err != nil || len(thread.Messages) == 0 {
 			h.Debug(ctx, "PostLocalNonblock: unable to read local storage, setting ClientPrev to 1")
 			prevMsgID = 1
@@ -2065,30 +2178,6 @@ func (h *Server) uploadAsset(ctx context.Context, sessionID int, params chat1.S3
 	return h.store.UploadAsset(ctx, &task)
 }
 
-func (h *Server) deleteAssets(ctx context.Context, conversationID chat1.ConversationID, assets []chat1.Asset) {
-	if len(assets) == 0 {
-		return
-	}
-
-	// get s3 params from server
-	params, err := h.remoteClient().GetS3Params(ctx, conversationID)
-	if err != nil {
-		h.Debug(ctx, "error getting s3 params: %s", err)
-		return
-	}
-
-	if err := h.store.DeleteAssets(ctx, params, h, assets); err != nil {
-		h.Debug(ctx, "error deleting assets: %s", err)
-
-		// there's no way to get asset information after this point.
-		// any assets not deleted will be stranded on s3.
-
-		return
-	}
-
-	h.Debug(ctx, "deleted %d assets", len(assets))
-}
-
 func (h *Server) FindConversationsLocal(ctx context.Context,
 	arg chat1.FindConversationsLocalArg) (res chat1.FindConversationsLocalRes, err error) {
 	var identBreaks []keybase1.TLFIdentifyFailure
@@ -2429,77 +2518,6 @@ func (g *remoteNotificationSuccessHandler) ShouldRetryOnConnect(err error) bool 
 	return false
 }
 
-func (h *Server) sendRemoteNotificationSuccessful(ctx context.Context, pushIDs []string) {
-	// Get session token
-	nist, _, err := h.G().ActiveDevice.NISTAndUID(ctx)
-	if nist == nil {
-		h.Debug(ctx, "sendRemoteNotificationSuccessful: got a nil NIST, is the user logged out?")
-		return
-	}
-	if err != nil {
-		h.Debug(ctx, "sendRemoteNotificationSuccessful: failed to get logged in session: %s", err.Error())
-		return
-	}
-
-	// Make an ad hoc connection to gregor
-	uri, err := rpc.ParseFMPURI(h.G().Env.GetGregorURI())
-	if err != nil {
-		h.Debug(ctx, "sendRemoteNotificationSuccessful: failed to parse chat server UR: %s", err.Error())
-		return
-	}
-
-	var conn *rpc.Connection
-	if uri.UseTLS() {
-		rawCA := h.G().Env.GetBundledCA(uri.Host)
-		if len(rawCA) == 0 {
-			h.Debug(ctx, "sendRemoteNotificationSuccessful: failed to parse CAs: %s", err.Error())
-			return
-		}
-		conn = rpc.NewTLSConnection(rpc.NewFixedRemote(uri.HostPort),
-			[]byte(rawCA), libkb.NewContextifiedErrorUnwrapper(h.G().ExternalG()),
-			&remoteNotificationSuccessHandler{}, libkb.NewRPCLogFactory(h.G().ExternalG()),
-			logger.LogOutputWithDepthAdder{Logger: h.G().Log}, rpc.ConnectionOpts{})
-	} else {
-		t := rpc.NewConnectionTransport(uri, nil, libkb.MakeWrapError(h.G().ExternalG()))
-		conn = rpc.NewConnectionWithTransport(&remoteNotificationSuccessHandler{}, t,
-			libkb.NewContextifiedErrorUnwrapper(h.G().ExternalG()),
-			logger.LogOutputWithDepthAdder{Logger: h.G().Log}, rpc.ConnectionOpts{})
-	}
-	defer conn.Shutdown()
-
-	// Make remote successful call on our ad hoc conn
-	cli := chat1.RemoteClient{Cli: NewRemoteClient(h.G(), conn.GetClient())}
-	if err = cli.RemoteNotificationSuccessful(ctx,
-		chat1.RemoteNotificationSuccessfulArg{
-			AuthToken:        gregor1.SessionToken(nist.Token().String()),
-			CompanionPushIDs: pushIDs,
-		}); err != nil {
-		h.Debug(ctx, "UnboxMobilePushNotification: failed to invoke remote notification success: %",
-			err.Error())
-	}
-}
-
-func (h *Server) formatPushText(ctx context.Context, uid gregor1.UID, convID chat1.ConversationID,
-	membersType chat1.ConversationMembersType, msg chat1.MessageUnboxed) string {
-	switch membersType {
-	case chat1.ConversationMembersType_TEAM:
-		// Try to get the channel name
-		ib, _, err := h.G().InboxSource.Read(ctx, uid, nil, true, &chat1.GetInboxLocalQuery{
-			ConvIDs: []chat1.ConversationID{convID},
-		}, nil)
-		if err != nil || len(ib.Convs) == 0 {
-			// Don't give up here, just display the team name only
-			h.Debug(ctx, "formatPushText: failed to unbox convo, using team only")
-			return fmt.Sprintf("%s (%s): %s", msg.Valid().SenderUsername, msg.Valid().ClientHeader.TlfName,
-				msg.Valid().MessageBody.Text().Body)
-		}
-		return fmt.Sprintf("%s (%s#%s): %s", msg.Valid().SenderUsername, msg.Valid().ClientHeader.TlfName,
-			utils.GetTopicName(ib.Convs[0]), msg.Valid().MessageBody.Text().Body)
-	default:
-		return fmt.Sprintf("%s: %s", msg.Valid().SenderUsername, msg.Valid().MessageBody.Text().Body)
-	}
-}
-
 func (h *Server) UnboxMobilePushNotification(ctx context.Context, arg chat1.UnboxMobilePushNotificationArg) (res string, err error) {
 	var identBreaks []keybase1.TLFIdentifyFailure
 	ctx = Context(ctx, h.G(), keybase1.TLFIdentifyBehavior_CHAT_GUI, &identBreaks, h.identNotifier)
@@ -2509,75 +2527,18 @@ func (h *Server) UnboxMobilePushNotification(ctx context.Context, arg chat1.Unbo
 	if err = h.assertLoggedIn(ctx); err != nil {
 		return res, err
 	}
-	defer func() {
-		if err == nil {
-			// If we have succeeded, let us let the server know that it can abort the push notification
-			// associated with this silent one
-			h.sendRemoteNotificationSuccessful(ctx, arg.PushIDs)
-		}
-	}()
-
-	// Parse the message payload and convID
 	bConvID, err := hex.DecodeString(arg.ConvID)
 	if err != nil {
 		h.Debug(ctx, "UnboxMobilePushNotification: invalid convID: %s msg: %s", arg.ConvID, err.Error())
 		return res, err
 	}
 	convID := chat1.ConversationID(bConvID)
-	bMsg, err := base64.StdEncoding.DecodeString(arg.Payload)
-	if err != nil {
-		h.Debug(ctx, "UnboxMobilePushNotification: invalid message payload: %s", err.Error())
+	if res, err = h.G().ChatHelper.UnboxMobilePushNotification(ctx, uid, convID, arg.MembersType, arg.PushIDs,
+		arg.Payload); err != nil {
 		return res, err
 	}
-	var msgBoxed chat1.MessageBoxed
-	mh := codec.MsgpackHandle{WriteExt: true}
-	if err = codec.NewDecoderBytes(bMsg, &mh).Decode(&msgBoxed); err != nil {
-		h.Debug(ctx, "UnboxMobilePushNotification: failed to msgpack decode payload: %s", err.Error())
-		return res, err
-	}
-
-	// Unbox first
-	vis := keybase1.TLFVisibility_PRIVATE
-	if msgBoxed.ClientHeader.TlfPublic {
-		vis = keybase1.TLFVisibility_PUBLIC
-	}
-	unboxInfo := newBasicUnboxConversationInfo(convID, arg.MembersType, nil, vis)
-	msgUnboxed, err := NewBoxer(h.G()).UnboxMessage(ctx, msgBoxed, unboxInfo)
-	if err != nil {
-		h.Debug(ctx, "UnboxMobilePushNotification: unbox failed, bailing: %s", err.Error())
-		return res, err
-	}
-
-	// Check to see if this will be a strict append before adding to the body cache
-	if err := h.G().ConvSource.AcquireConversationLock(ctx, uid, convID); err != nil {
-		return res, err
-	}
-	maxMsgID, err := storage.New(h.G()).GetMaxMsgID(ctx, convID, uid)
-	if err == nil {
-		if msgUnboxed.GetMessageID() > maxMsgID {
-			if _, err = h.G().ConvSource.PushUnboxed(ctx, convID, uid, msgUnboxed); err != nil {
-				h.Debug(ctx, "UnboxMobilePushNotification: failed to push message to conv source: %s",
-					err.Error())
-			}
-		} else {
-			h.Debug(ctx, "UnboxMobilePushNotification: message from the past, skipping insert: msgID: %d maxMsgID: %d", msgUnboxed.GetMessageID(), maxMsgID)
-
-		}
-	} else {
-		h.Debug(ctx, "UnboxMobilePushNotification: failed to fetch max msg ID: %s", err)
-	}
-	h.G().ConvSource.ReleaseConversationLock(ctx, uid, convID)
-
-	// Form the push notification message
-	if msgUnboxed.IsValid() && msgUnboxed.GetMessageType() == chat1.MessageType_TEXT {
-		res = h.formatPushText(ctx, uid, convID, arg.MembersType, msgUnboxed)
-		h.Debug(ctx, "UnboxMobilePushNotification: successful unbox")
-		return res, nil
-	}
-
-	h.Debug(ctx, "UnboxMobilePushNotification: invalid message received: typ: %v",
-		msgUnboxed.GetMessageType())
-	return "", errors.New("invalid message")
+	h.G().ChatHelper.AckMobileNotificationSuccess(ctx, arg.PushIDs)
+	return res, nil
 }
 
 func (h *Server) SetGlobalAppNotificationSettingsLocal(ctx context.Context,

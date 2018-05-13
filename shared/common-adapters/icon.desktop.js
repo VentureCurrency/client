@@ -3,12 +3,11 @@ import * as shared from './icon.shared'
 import logger from '../logger'
 import React, {Component} from 'react'
 import shallowEqual from 'shallowequal'
-import {globalColors, glamorous, desktopStyles} from '../styles'
+import {globalColors, glamorous, desktopStyles, collapseStyles} from '../styles'
 import {iconMeta} from './icon.constants'
 import {resolveImageAsURL} from '../desktop/resolve-root'
 import Box from './box'
 
-import type {Exact} from '../constants/types/more'
 import type {Props, IconType} from './icon'
 
 const StyledSpan = glamorous.span(props => ({
@@ -22,8 +21,8 @@ const StyledSpan = glamorous.span(props => ({
     : null),
 }))
 
-class Icon extends Component<Exact<Props>, void> {
-  shouldComponentUpdate(nextProps: Exact<Props>, nextState: any): boolean {
+class Icon extends Component<Props, void> {
+  shouldComponentUpdate(nextProps: Props, nextState: any): boolean {
     return !shallowEqual(this.props, nextProps, (obj, oth, key) => {
       if (key === 'style') {
         return shallowEqual(obj, oth)
@@ -47,17 +46,15 @@ class Icon extends Component<Exact<Props>, void> {
       hoverColor = 'inherit'
     } else {
       color =
-        (this.props.style && this.props.style.color) ||
-        color ||
-        (this.props.opacity ? globalColors.lightGrey : globalColors.black_40)
+        this.props.color || color || (this.props.opacity ? globalColors.lightGrey : globalColors.black_40)
       hoverColor =
-        (this.props.style && this.props.style.hoverColor) ||
+        this.props.hoverColor ||
         hoverColor ||
         (this.props.opacity ? globalColors.black : globalColors.black_75)
     }
 
     const isFontIcon = iconType.startsWith('iconfont-')
-    const fontSizeHint = shared.fontSize(iconType)
+    const fontSizeHint = this.props.fontSize ? {fontSize: this.props.fontSize} : shared.fontSize(iconType)
     const onClick = this.props.onClick
       ? e => {
           e.stopPropagation()
@@ -65,21 +62,42 @@ class Icon extends Component<Exact<Props>, void> {
         }
       : null
 
-    if (isFontIcon) {
-      const cleanStyle = {
-        fontFamily: 'kb',
-        speak: 'none',
-        fontStyle: 'normal',
-        fontWeight: 'normal',
-        fontVariant: 'normal',
-        textTransform: 'none',
-        lineHeight: 1, // NOT 1px, just 1
-        WebkitFontSmoothing: 'antialiased',
-        ...this.props.style,
-      }
-      // We have to blow these styles away else FontIcon gets confused and will overwrite what it calculates
-      delete cleanStyle.color
-      delete cleanStyle.hoverColor
+    const hasContainer = (this.props.onClick && this.props.style) || isFontIcon
+
+    const imgStyle = collapseStyles([
+      desktopStyles.noSelect,
+      !hasContainer ? this.props.style : {},
+      onClick ? desktopStyles.clickable : {},
+      this.props.color ? {color: color} : {},
+    ])
+
+    const iconElement = isFontIcon ? (
+      String.fromCharCode(iconMeta[iconType].charCode || 0)
+    ) : (
+      <img
+        className={this.props.className}
+        draggable="false"
+        title={this.props.hint}
+        style={imgStyle}
+        onClick={onClick}
+        srcSet={iconTypeToSrcSet(iconType)}
+      />
+    )
+
+    if (hasContainer) {
+      const cleanStyle = collapseStyles([
+        {
+          fontFamily: 'kb',
+          speak: 'none',
+          fontStyle: 'normal',
+          fontWeight: 'normal',
+          fontVariant: 'normal',
+          textTransform: 'none',
+          lineHeight: 1, // NOT 1px, just 1
+          WebkitFontSmoothing: 'antialiased',
+        },
+        this.props.style,
+      ])
 
       return (
         <Box>
@@ -99,25 +117,12 @@ class Icon extends Component<Exact<Props>, void> {
             hoverColor={onClick ? hoverColor : null}
             onClick={onClick}
           >
-            {String.fromCharCode(iconMeta[iconType].charCode || 0)}
+            {iconElement}
           </StyledSpan>
         </Box>
       )
     } else {
-      return (
-        <img
-          className={this.props.className}
-          draggable="false"
-          title={this.props.hint}
-          style={{
-            ...desktopStyles.noSelect,
-            ...this.props.style,
-            ...(onClick ? desktopStyles.clickable : {}),
-          }}
-          onClick={onClick}
-          srcSet={iconTypeToSrcSet(iconType)}
-        />
-      )
+      return iconElement
     }
   }
 }

@@ -14,8 +14,6 @@ type Props = {
   onFocusInput: () => void,
   onShowTracker: (user: string) => void,
   showSearchResults: boolean,
-  // TODO DESKTOP-6256 get rid of this
-  onToggleInfoPanel: () => void,
 }
 
 class ListArea extends React.PureComponent<Props> {
@@ -33,7 +31,6 @@ class ListArea extends React.PureComponent<Props> {
         <Normal
           listScrollDownCounter={this.props.listScrollDownCounter}
           onFocusInput={this.props.onFocusInput}
-          onToggleInfoPanel={this.props.onToggleInfoPanel}
           conversationIDKey={this.props.conversationIDKey}
         />
       )
@@ -43,7 +40,7 @@ class ListArea extends React.PureComponent<Props> {
 
 const searchResultStyle = {...desktopStyles.scrollable, flexGrow: 1}
 
-const mapStateToProps = (state: TypedState): * => ({
+const mapStateToProps = (state: TypedState) => ({
   showSearchResults:
     state.chat2.pendingSelected &&
     state.chat2.pendingMode === 'searchingForUsers' &&

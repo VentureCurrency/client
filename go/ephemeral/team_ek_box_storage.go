@@ -123,13 +123,13 @@ func (s *TeamEKBoxStorage) fetchAndPut(ctx context.Context, teamID keybase1.Team
 	}
 
 	if result.Result == nil {
-		return teamEK, fmt.Errorf("server didn't return a box for teamEK generation %d", generation)
+		return teamEK, newEKMissingBoxErr(TeamEKStr, generation)
 	}
 
 	// Before we store anything, let's verify that the server returned
 	// signature is valid and the KID it has signed matches the boxed seed.
 	// Otherwise something's fishy..
-	teamEKStatement, wrongKID, err := verifySigWithLatestPTK(ctx, s.G(), teamID, result.Result.Sig)
+	teamEKStatement, _, wrongKID, err := verifySigWithLatestPTK(ctx, s.G(), teamID, result.Result.Sig)
 
 	// Check the wrongKID condition before checking the error, since an error
 	// is still returned in this case. TODO: Turn this warning into an error
@@ -360,7 +360,7 @@ func (s *MemoryStorage) GetMap(teamID keybase1.TeamID) (teamEKBoxes TeamEKBoxMap
 	}
 	teamEKBoxes, ok := untyped.(TeamEKBoxMap)
 	if !ok {
-		s.G().Log.Warning("Team MemoryStorage got bad type from lru: %T", untyped)
+		s.G().Log.CDebugf(context.TODO(), "Team MemoryStorage got bad type from lru: %T", untyped)
 		return teamEKBoxes, found
 	}
 	return teamEKBoxes, found

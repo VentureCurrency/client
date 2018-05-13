@@ -531,11 +531,6 @@ func (s *HybridInboxSource) fetchRemoteInbox(ctx context.Context, uid gregor1.UI
 		if expunge != nil {
 			s.G().ConvSource.Expunge(ctx, conv.GetConvID(), uid, *expunge)
 		}
-		// Delete message expunge
-		if delMsg, err := conv.GetMaxMessage(chat1.MessageType_DELETE); err == nil {
-			s.G().ConvSource.ExpungeFromDelete(ctx, uid, conv.GetConvID(), delMsg.GetMessageID())
-		}
-
 		// Queue all these convs up to be loaded by the background loader
 		// Only load first 100 so we don't get the conv loader too backed up
 		if index < 100 {
@@ -1049,7 +1044,7 @@ func getUnverifiedTlfNameForErrors(conversationRemote chat1.Conversation) string
 func (s *localizerPipeline) getMessagesOffline(ctx context.Context, convID chat1.ConversationID,
 	uid gregor1.UID, msgs []chat1.MessageSummary, finalizeInfo *chat1.ConversationFinalizeInfo) ([]chat1.MessageUnboxed, chat1.ConversationErrorType, error) {
 
-	st := storage.New(s.G())
+	st := storage.New(s.G(), s.G().ConvSource)
 	res, err := st.FetchMessages(ctx, convID, uid, utils.PluckMessageIDs(msgs))
 	if err != nil {
 		// Just say we didn't find it in this case

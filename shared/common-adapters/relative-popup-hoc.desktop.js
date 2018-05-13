@@ -10,11 +10,9 @@ import {type StylesCrossPlatform, collapseStyles} from '../styles'
 
 import type {Position, RelativePopupHocType, RelativePopupProps} from './relative-popup-hoc'
 
-const modalRoot = document.getElementById('modal-root')
-
 class DOMNodeFinder extends React.Component<{
   setNode: (node: HTMLElement) => void,
-  children: React.Element<*>,
+  children: React.Element<any>,
 }> {
   componentDidMount() {
     const {setNode} = this.props
@@ -29,8 +27,8 @@ class DOMNodeFinder extends React.Component<{
     return React.Children.only(children)
   }
 }
-
-class Modal extends React.Component<{setNode: (node: HTMLElement) => void, children: React.Element<*>}> {
+const getModalRoot = () => document.getElementById('modal-root')
+class Modal extends React.Component<{setNode: (node: HTMLElement) => void, children: React.Element<any>}> {
   el: HTMLElement
   constructor() {
     super()
@@ -38,6 +36,7 @@ class Modal extends React.Component<{setNode: (node: HTMLElement) => void, child
   }
 
   componentDidMount() {
+    const modalRoot = getModalRoot()
     modalRoot && modalRoot.appendChild(this.el)
     const firstChild = this.el.firstChild
     if (firstChild instanceof HTMLElement) {
@@ -46,6 +45,7 @@ class Modal extends React.Component<{setNode: (node: HTMLElement) => void, child
   }
 
   componentWillUnmount() {
+    const modalRoot = getModalRoot()
     modalRoot && modalRoot.removeChild(this.el)
   }
 
@@ -245,21 +245,11 @@ function ModalPositionRelative<PP>(
     }
 
     render() {
-      // React will complain if WrappedComponent is a HTMLElement and we try to attach these props
-      const noPassProps = ['targetRect', 'position', 'onClosePopup']
-      // $ForceType thinks {} is invalid for PP, we're filtering out the HOC's props
-      const passProps: PP = Object.keys(this.props).reduce((res, k) => {
-        if (!noPassProps.includes(k)) {
-          res[k] = this.props[k]
-        }
-        return res
-      }, {})
-
       return (
         <Modal setNode={this._setRef}>
           <Box style={this.state.style}>
             <EscapeHandler onESC={this.props.onClosePopup}>
-              <WrappedComponent {...(passProps: PP)} />
+              <WrappedComponent {...(this.props: PP)} />
             </EscapeHandler>
           </Box>
         </Modal>
@@ -270,12 +260,12 @@ function ModalPositionRelative<PP>(
   return ModalPositionRelativeClass
 }
 
-const RelativePopupHoc: RelativePopupHocType<*> = PopupComponent => {
-  const ModalPopupComponent: React.ComponentType<ModalPositionRelativeProps<*>> = ModalPositionRelative(
+const RelativePopupHoc: RelativePopupHocType<any> = PopupComponent => {
+  const ModalPopupComponent: React.ComponentType<ModalPositionRelativeProps<any>> = ModalPositionRelative(
     PopupComponent
   )
 
-  const C: React.ComponentType<RelativePopupProps<*>> = connect(
+  const C: React.ComponentType<RelativePopupProps<any>> = connect(
     undefined,
     (dispatch: Dispatch, {navigateUp, routeProps}) => ({
       onClosePopup: () => {
@@ -286,9 +276,9 @@ const RelativePopupHoc: RelativePopupHocType<*> = PopupComponent => {
       targetRect: routeProps.get('targetRect'),
       position: routeProps.get('position'),
     })
-  )((props: RelativePopupProps<*> & {onClosePopup: () => void}) => {
+  )((props: RelativePopupProps<any> & {onClosePopup: () => void}) => {
     // $FlowIssue
-    return <ModalPopupComponent {...(props: RelativePopupProps<*>)} onClosePopup={props.onClosePopup} />
+    return <ModalPopupComponent {...(props: RelativePopupProps<any>)} onClosePopup={props.onClosePopup} />
   })
 
   return C

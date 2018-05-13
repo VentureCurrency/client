@@ -2230,6 +2230,7 @@ const (
 	MessageUnboxedErrorType_BADVERSION_CRITICAL MessageUnboxedErrorType = 1
 	MessageUnboxedErrorType_BADVERSION          MessageUnboxedErrorType = 2
 	MessageUnboxedErrorType_IDENTIFY            MessageUnboxedErrorType = 3
+	MessageUnboxedErrorType_EPHEMERAL           MessageUnboxedErrorType = 4
 )
 
 func (o MessageUnboxedErrorType) DeepCopy() MessageUnboxedErrorType { return o }
@@ -2239,6 +2240,7 @@ var MessageUnboxedErrorTypeMap = map[string]MessageUnboxedErrorType{
 	"BADVERSION_CRITICAL": 1,
 	"BADVERSION":          2,
 	"IDENTIFY":            3,
+	"EPHEMERAL":           4,
 }
 
 var MessageUnboxedErrorTypeRevMap = map[MessageUnboxedErrorType]string{
@@ -2246,6 +2248,7 @@ var MessageUnboxedErrorTypeRevMap = map[MessageUnboxedErrorType]string{
 	1: "BADVERSION_CRITICAL",
 	2: "BADVERSION",
 	3: "IDENTIFY",
+	4: "EPHEMERAL",
 }
 
 func (e MessageUnboxedErrorType) String() string {
@@ -2256,30 +2259,38 @@ func (e MessageUnboxedErrorType) String() string {
 }
 
 type MessageUnboxedError struct {
-	ErrType     MessageUnboxedErrorType `codec:"errType" json:"errType"`
-	ErrMsg      string                  `codec:"errMsg" json:"errMsg"`
-	MessageID   MessageID               `codec:"messageID" json:"messageID"`
-	MessageType MessageType             `codec:"messageType" json:"messageType"`
-	Ctime       gregor1.Time            `codec:"ctime" json:"ctime"`
+	ErrType            MessageUnboxedErrorType `codec:"errType" json:"errType"`
+	ErrMsg             string                  `codec:"errMsg" json:"errMsg"`
+	MessageID          MessageID               `codec:"messageID" json:"messageID"`
+	MessageType        MessageType             `codec:"messageType" json:"messageType"`
+	Ctime              gregor1.Time            `codec:"ctime" json:"ctime"`
+	IsEphemeral        bool                    `codec:"ie" json:"ie"`
+	IsEphemeralExpired bool                    `codec:"iex" json:"iex"`
+	Etime              gregor1.Time            `codec:"e" json:"e"`
 }
 
 func (o MessageUnboxedError) DeepCopy() MessageUnboxedError {
 	return MessageUnboxedError{
-		ErrType:     o.ErrType.DeepCopy(),
-		ErrMsg:      o.ErrMsg,
-		MessageID:   o.MessageID.DeepCopy(),
-		MessageType: o.MessageType.DeepCopy(),
-		Ctime:       o.Ctime.DeepCopy(),
+		ErrType:            o.ErrType.DeepCopy(),
+		ErrMsg:             o.ErrMsg,
+		MessageID:          o.MessageID.DeepCopy(),
+		MessageType:        o.MessageType.DeepCopy(),
+		Ctime:              o.Ctime.DeepCopy(),
+		IsEphemeral:        o.IsEphemeral,
+		IsEphemeralExpired: o.IsEphemeralExpired,
+		Etime:              o.Etime.DeepCopy(),
 	}
 }
 
 type MessageUnboxedPlaceholder struct {
 	MessageID MessageID `codec:"messageID" json:"messageID"`
+	Hidden    bool      `codec:"hidden" json:"hidden"`
 }
 
 func (o MessageUnboxedPlaceholder) DeepCopy() MessageUnboxedPlaceholder {
 	return MessageUnboxedPlaceholder{
 		MessageID: o.MessageID.DeepCopy(),
+		Hidden:    o.Hidden,
 	}
 }
 
@@ -2943,6 +2954,32 @@ var GetThreadNonblockReasonRevMap = map[GetThreadNonblockReason]string{
 
 func (e GetThreadNonblockReason) String() string {
 	if v, ok := GetThreadNonblockReasonRevMap[e]; ok {
+		return v
+	}
+	return ""
+}
+
+type GetThreadNonblockPgMode int
+
+const (
+	GetThreadNonblockPgMode_DEFAULT GetThreadNonblockPgMode = 0
+	GetThreadNonblockPgMode_SERVER  GetThreadNonblockPgMode = 1
+)
+
+func (o GetThreadNonblockPgMode) DeepCopy() GetThreadNonblockPgMode { return o }
+
+var GetThreadNonblockPgModeMap = map[string]GetThreadNonblockPgMode{
+	"DEFAULT": 0,
+	"SERVER":  1,
+}
+
+var GetThreadNonblockPgModeRevMap = map[GetThreadNonblockPgMode]string{
+	0: "DEFAULT",
+	1: "SERVER",
+}
+
+func (e GetThreadNonblockPgMode) String() string {
+	if v, ok := GetThreadNonblockPgModeRevMap[e]; ok {
 		return v
 	}
 	return ""
@@ -3817,6 +3854,7 @@ type GetThreadNonblockArg struct {
 	ConversationID   ConversationID               `codec:"conversationID" json:"conversationID"`
 	CbMode           GetThreadNonblockCbMode      `codec:"cbMode" json:"cbMode"`
 	Reason           GetThreadNonblockReason      `codec:"reason" json:"reason"`
+	Pgmode           GetThreadNonblockPgMode      `codec:"pgmode" json:"pgmode"`
 	Query            *GetThreadQuery              `codec:"query,omitempty" json:"query,omitempty"`
 	Pagination       *UIPagination                `codec:"pagination,omitempty" json:"pagination,omitempty"`
 	IdentifyBehavior keybase1.TLFIdentifyBehavior `codec:"identifyBehavior" json:"identifyBehavior"`
